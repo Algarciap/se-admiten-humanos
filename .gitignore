@@ -1,9 +1,7 @@
-.clasp.json
 .env
 .env.*
 !.env.example
 coverage/
-node_modules/
 tmp/
 *.log
 __pycache__/

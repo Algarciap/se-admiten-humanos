@@ -82,11 +82,23 @@ class SourceRegistry:
                 fields = ", ".join(sorted(missing))
                 raise ValueError(f"Source at index {index} is missing: {fields}")
 
+            empty = sorted(
+                field
+                for field in REQUIRED_FIELDS
+                if source[field] is None
+                or (isinstance(source[field], str) and not source[field].strip())
+            )
+            if empty:
+                fields = ", ".join(empty)
+                raise ValueError(f"Source at index {index} has empty values: {fields}")
+
             source_id = str(source["id"])
             if source_id in self._by_id:
                 raise ValueError(f"Duplicate source id: {source_id}")
 
             domain = _normalized_domain(str(source["base_url"]))
+            _normalized_domain(str(source["search_url"]))
+            _normalized_domain(str(source["evidence_url"]))
             if domain in self._domains:
                 raise ValueError(f"Duplicate source domain: {domain}")
 

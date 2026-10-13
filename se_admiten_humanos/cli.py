@@ -8,6 +8,7 @@ import sys
 from typing import Sequence
 
 from .pet_policy import classify
+from .source_registry import default_registry
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -15,6 +16,10 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     classify_parser = subparsers.add_parser("classify", help="classify pet-policy text")
     classify_parser.add_argument("text", nargs="?", help="text to classify; stdin is used if omitted")
+    subparsers.add_parser(
+        "validate-sources",
+        help="validate the source registry and report its source count",
+    )
     return parser
 
 
@@ -37,5 +42,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 indent=2,
             )
         )
+        return 0
+    if args.command == "validate-sources":
+        registry = default_registry()
+        print(f"Validated {registry.count} sources.")
         return 0
     return 2

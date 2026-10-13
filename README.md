@@ -20,56 +20,24 @@ messages through unsupported portal APIs.
 - Explainable Spanish/English pet-policy classifier.
 - Configurable Spanish outreach-message generator.
 - Machine-readable registry of portals, agencies, institutional landlords, and public housing sources.
-- Existing Google Apps Script prototype retained as an optional Gmail bridge during the Python migration.
 - Safe direct-email gate: draft by default, allow-listed agency email only for automatic sending.
-- Python and JavaScript regression tests plus source-registry validation.
+- Python regression tests plus source-registry validation.
+- Email ingestion, Telegram delivery, persistence, and live source adapters are the next implementation
+  milestones; none are deployed yet.
 
 ## Run locally
 
-Python 3.11 or newer is required for the core. Node.js 22 or newer is needed only for the retained
-Apps Script regression suite.
+Python 3.11 or newer is required.
 
 ```powershell
 python -m unittest discover -s tests -v
 "No se mencionan mascotas" | python -m se_admiten_humanos classify
-
-# Optional regression checks for the Apps Script bridge
-npm test
-npm run validate:sources
+python -m se_admiten_humanos validate-sources
 ```
 
-The Python package is the source of truth for new backend work. The JavaScript implementation remains
-temporarily so the Gmail bridge can continue to be tested while source adapters move to Python.
-
-## Gmail labels
-
-Create these labels in the dedicated Gmail account:
-
-- `rent-alerts`
-- `rent-alerts/processed`
-- `rent-alerts/error`
-
-Portal and agency alert messages should be filtered into `rent-alerts`. The script adds the processed
-or error label without changing the user's read/unread state.
-
-## Apps Script properties
-
-Set these in Apps Script project properties; never commit them:
-
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_CHAT_ID`
-- `OUTREACH_MODE`: `draft` or `auto_email`
-- `OUTREACH_FROM_NAME`
-- `RENTER_NAME`
-- `RENTER_MONTHLY_INCOME`
-- `RENTER_JOB`
-- `RENTER_PETS`
-- `AUTO_EMAIL_DOMAIN_ALLOWLIST`: comma-separated agency domains
-
-Run `installRentAlertTrigger()` once after reviewing the requested Gmail permissions. It installs a
-one-minute trigger. `OUTREACH_MODE=draft` is the safe default. Outreach is prepared only when the
-recipient's domain is explicitly included in `AUTO_EMAIL_DOMAIN_ALLOWLIST`; unknown addresses fail
-closed.
+The Python package is the single source of truth. The former Google Apps Script prototype and its
+duplicated classifier, outreach, registry, and tests were removed before deployment. Email ingestion
+will be implemented as a Python adapter so all inputs follow the same tested pipeline.
 
 ## Source policy
 
