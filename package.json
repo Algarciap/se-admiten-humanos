@@ -1,0 +1,15 @@
+{
+  "name": "se-admiten-humanos",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Explainable pet-friendly rental alerts with safe outreach workflows.",
+  "scripts": {
+    "test": "node --test",
+    "classify": "node scripts/classify.js",
+    "validate:sources": "node scripts/validate-sources.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "UNLICENSED"
+}
