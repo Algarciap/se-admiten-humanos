@@ -6,3 +6,10 @@ coverage/
 node_modules/
 tmp/
 *.log
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+*.egg-info/

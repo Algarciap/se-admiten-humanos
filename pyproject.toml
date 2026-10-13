@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "se-admiten-humanos"
+version = "0.2.0"
+description = "Explainable pet-friendly rental alerts with safe outreach workflows."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+dependencies = []
+
+[project.scripts]
+se-admiten-humanos = "se_admiten_humanos.cli:main"

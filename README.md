@@ -16,22 +16,30 @@ messages through unsupported portal APIs.
 
 ## Current state
 
+- Dependency-free Python core for classification, source recognition, contact safety, and outreach.
 - Explainable Spanish/English pet-policy classifier.
 - Configurable Spanish outreach-message generator.
 - Machine-readable registry of portals, agencies, institutional landlords, and public housing sources.
-- Google Apps Script prototype for Gmail labels and Telegram delivery.
+- Existing Google Apps Script prototype retained as an optional Gmail bridge during the Python migration.
 - Safe direct-email gate: draft by default, allow-listed agency email only for automatic sending.
-- Unit tests and source-registry validation with no third-party runtime dependencies.
+- Python and JavaScript regression tests plus source-registry validation.
 
 ## Run locally
 
-Node.js 22 or newer is required.
+Python 3.11 or newer is required for the core. Node.js 22 or newer is needed only for the retained
+Apps Script regression suite.
 
 ```powershell
+python -m unittest discover -s tests -v
+"No se mencionan mascotas" | python -m se_admiten_humanos classify
+
+# Optional regression checks for the Apps Script bridge
 npm test
 npm run validate:sources
-"No se mencionan mascotas" | npm run classify
 ```
+
+The Python package is the source of truth for new backend work. The JavaScript implementation remains
+temporarily so the Gmail bridge can continue to be tested while source adapters move to Python.
 
 ## Gmail labels
 
