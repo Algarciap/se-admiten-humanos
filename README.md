@@ -21,11 +21,11 @@ messages through unsupported portal APIs.
 - Configurable Spanish outreach-message generator.
 - Multi-user renter and search profiles with structured pets and independent preferences.
 - SQLite schema migrations, shared listing history, per-profile matches, and notification claims.
+- End-to-end listing pipeline that classifies once and evaluates every enabled search independently.
 - Machine-readable registry of portals, agencies, institutional landlords, and public housing sources.
 - Safe direct-email gate: draft by default, allow-listed agency email only for automatic sending.
 - Python regression tests plus source-registry validation.
-- Email ingestion, Telegram delivery, and live source adapters are the next implementation milestones;
-  none are deployed yet.
+- Email ingestion, Telegram delivery, and live source adapters remain undeployed.
 
 ## Run locally
 
@@ -54,6 +54,10 @@ The local file is ignored by Git because it may contain names, income, employmen
 The SQLite database is also ignored and should be treated as private because this development version
 stores those fields in plaintext. The future website will replace the JSON import with authenticated
 forms and encrypted production storage.
+
+Source adapters should pass normalized listings to `ListingPipeline.process()`. The pipeline returns
+profile-specific delivery candidates but does not claim or send them; a notification adapter must
+atomically call `claim_notification()` immediately before delivery.
 
 ## Source policy
 

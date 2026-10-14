@@ -438,17 +438,39 @@ class RentalStore:
         ).fetchone()
         if row is None:
             raise KeyError(f"Unknown search profile: {profile_id}")
+        return self._search_profile_from_row(row)
+
+    def load_enabled_search_profiles(self) -> tuple[SearchProfile, ...]:
+        """Load every active search in deterministic order for matching."""
+
+        rows = self.connection.execute(
+            """
+            select
+                id, user_id, name, max_rent_eur, municipality,
+                renter_profile_id, acceptable_districts_json,
+                preferred_min_bedrooms, allow_studios,
+                allow_unknown_bedrooms, furnished, move_in_asap, move_in_by,
+                requires_pet_acceptance, enabled
+            from search_profiles
+            where enabled = 1
+            order by id
+            """
+        ).fetchall()
+        return tuple(self._search_profile_from_row(row) for row in rows)
+
+    @staticmethod
+    def _search_profile_from_row(row: tuple[object, ...]) -> SearchProfile:
         furnished = None if row[10] is None else bool(row[10])
         move_in_by = date.fromisoformat(row[12]) if row[12] else None
         return SearchProfile(
-            id=row[0],
-            user_id=row[1],
-            name=row[2],
-            max_rent_eur=row[3],
-            municipality=row[4],
-            renter_profile_id=row[5],
+            id=str(row[0]),
+            user_id=str(row[1]),
+            name=str(row[2]),
+            max_rent_eur=int(row[3]),
+            municipality=str(row[4]),
+            renter_profile_id=str(row[5]) if row[5] is not None else None,
             acceptable_districts=tuple(json.loads(row[6])),
-            preferred_min_bedrooms=row[7],
+            preferred_min_bedrooms=int(row[7]),
             allow_studios=bool(row[8]),
             allow_unknown_bedrooms=bool(row[9]),
             furnished=furnished,
@@ -623,6 +645,21 @@ class RentalStore:
                 (match_id, normalized_channel, updated_at),
             )
         return cursor.rowcount == 1
+
+    def notification_status(self, match_id: int, channel: str) -> str | None:
+        """Return delivery state for one profile match and channel."""
+
+        normalized_channel = channel.strip().casefold()
+        if not normalized_channel:
+            raise ValueError("Notification channel cannot be empty")
+        row = self.connection.execute(
+            """
+            select status from notifications
+            where match_id = ? and channel = ?
+            """,
+            (match_id, normalized_channel),
+        ).fetchone()
+        return str(row[0]) if row is not None else None
 
     def mark_notification_sent(self, match_id: int, channel: str) -> None:
         """Mark a claimed notification as successfully delivered."""
