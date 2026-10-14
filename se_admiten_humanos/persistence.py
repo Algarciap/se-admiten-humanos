@@ -12,11 +12,11 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from .models import Listing, PetDecision, RenterProfile, User
+from .models import Listing, PetDecision, RenterProfile, User, WebsiteDiscovery
 from .search_profile import SearchDecision, SearchProfile
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def _normalize_text(value: str) -> str:
@@ -186,11 +186,16 @@ class RentalStore:
         if version == 0:
             self._create_schema_v2()
             self._migrate_v2_to_v3()
+            self._migrate_v3_to_v4()
         elif version == 1:
             self._migrate_v1_to_v2()
             self._migrate_v2_to_v3()
+            self._migrate_v3_to_v4()
         elif version == 2:
             self._migrate_v2_to_v3()
+            self._migrate_v3_to_v4()
+        elif version == 3:
+            self._migrate_v3_to_v4()
         elif version != SCHEMA_VERSION:
             raise RuntimeError(
                 f"Unsupported database schema version {version}; expected {SCHEMA_VERSION}"
@@ -344,6 +349,188 @@ class RentalStore:
             """
         )
         self.connection.commit()
+
+    def _migrate_v3_to_v4(self) -> None:
+        self.connection.executescript(
+            """
+            create table if not exists website_source_state (
+                source_id text primary key,
+                initialized_at text not null,
+                last_scan_at text not null,
+                last_discovery_count integer not null
+                    check (last_discovery_count > 0)
+            );
+
+            create table if not exists website_discoveries (
+                source_id text not null
+                    references website_source_state(source_id) on delete cascade,
+                external_id text not null,
+                url text not null,
+                source_last_modified text not null default '',
+                first_seen_at text not null,
+                last_seen_at text not null,
+                processed_at text,
+                primary key (source_id, external_id)
+            );
+
+            create index if not exists website_discoveries_pending_idx
+                on website_discoveries(source_id, processed_at, first_seen_at);
+
+            pragma user_version = 4;
+            """
+        )
+        self.connection.commit()
+
+    def website_source_initialized(self, source_id: str) -> bool:
+        """Return whether a website source has an explicit no-alert baseline."""
+
+        normalized_source_id = source_id.strip().casefold()
+        if not normalized_source_id:
+            raise ValueError("Source id cannot be empty")
+        row = self.connection.execute(
+            "select 1 from website_source_state where source_id = ?",
+            (normalized_source_id,),
+        ).fetchone()
+        return row is not None
+
+    def baseline_website_discoveries(
+        self,
+        source_id: str,
+        discoveries: tuple[WebsiteDiscovery, ...],
+    ) -> int:
+        """Seed existing stock as processed so first use never floods users."""
+
+        normalized_source_id = source_id.strip().casefold()
+        validated = self._validate_website_discoveries(normalized_source_id, discoveries)
+        if self.website_source_initialized(normalized_source_id):
+            raise ValueError(f"Website source {normalized_source_id!r} is already initialized")
+        now = _utc_now()
+        with self.connection:
+            self.connection.execute(
+                """
+                insert into website_source_state (
+                    source_id, initialized_at, last_scan_at, last_discovery_count
+                ) values (?, ?, ?, ?)
+                """,
+                (normalized_source_id, now, now, len(validated)),
+            )
+            self.connection.executemany(
+                """
+                insert into website_discoveries (
+                    source_id, external_id, url, source_last_modified,
+                    first_seen_at, last_seen_at, processed_at
+                ) values (?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        normalized_source_id,
+                        item.external_id.strip(),
+                        item.url.strip(),
+                        item.source_last_modified.strip(),
+                        now,
+                        now,
+                        now,
+                    )
+                    for item in validated
+                ],
+            )
+        return len(validated)
+
+    def sync_website_discoveries(
+        self,
+        source_id: str,
+        discoveries: tuple[WebsiteDiscovery, ...],
+    ) -> tuple[WebsiteDiscovery, ...]:
+        """Persist a complete discovery snapshot and return unseen identities."""
+
+        normalized_source_id = source_id.strip().casefold()
+        validated = self._validate_website_discoveries(normalized_source_id, discoveries)
+        if not self.website_source_initialized(normalized_source_id):
+            raise ValueError(
+                f"Website source {normalized_source_id!r} needs a baseline before live runs"
+            )
+        now = _utc_now()
+        with self.connection:
+            for item in validated:
+                self.connection.execute(
+                    """
+                    insert into website_discoveries (
+                        source_id, external_id, url, source_last_modified,
+                        first_seen_at, last_seen_at, processed_at
+                    ) values (?, ?, ?, ?, ?, ?, null)
+                    on conflict(source_id, external_id) do update set
+                        url = excluded.url,
+                        source_last_modified = excluded.source_last_modified,
+                        last_seen_at = excluded.last_seen_at
+                    """,
+                    (
+                        normalized_source_id,
+                        item.external_id.strip(),
+                        item.url.strip(),
+                        item.source_last_modified.strip(),
+                        now,
+                        now,
+                    ),
+                )
+            self.connection.execute(
+                """
+                update website_source_state
+                set last_scan_at = ?, last_discovery_count = ?
+                where source_id = ?
+                """,
+                (now, len(validated), normalized_source_id),
+            )
+        rows = self.connection.execute(
+            """
+            select external_id, url, source_last_modified
+            from website_discoveries
+            where source_id = ? and processed_at is null
+            order by first_seen_at, external_id
+            """,
+            (normalized_source_id,),
+        ).fetchall()
+        return tuple(
+            WebsiteDiscovery(str(row[0]), str(row[1]), str(row[2])) for row in rows
+        )
+
+    def mark_website_discovery_processed(self, source_id: str, external_id: str) -> None:
+        """Acknowledge a discovery only after processing and delivery finish."""
+
+        normalized_source_id = source_id.strip().casefold()
+        normalized_external_id = external_id.strip()
+        if not normalized_source_id or not normalized_external_id:
+            raise ValueError("Source id and external id cannot be empty")
+        with self.connection:
+            cursor = self.connection.execute(
+                """
+                update website_discoveries
+                set processed_at = ?
+                where source_id = ? and external_id = ? and processed_at is null
+                """,
+                (_utc_now(), normalized_source_id, normalized_external_id),
+            )
+        if cursor.rowcount != 1:
+            raise RuntimeError("Website discovery must be pending before acknowledgement")
+
+    @staticmethod
+    def _validate_website_discoveries(
+        source_id: str,
+        discoveries: tuple[WebsiteDiscovery, ...],
+    ) -> tuple[WebsiteDiscovery, ...]:
+        if not source_id:
+            raise ValueError("Source id cannot be empty")
+        if not discoveries:
+            raise ValueError("Website discovery returned zero listings; refusing to continue")
+        by_id: dict[str, WebsiteDiscovery] = {}
+        for item in discoveries:
+            external_id = item.external_id.strip()
+            previous = by_id.get(external_id)
+            if previous is not None and previous.url.strip() != item.url.strip():
+                raise ValueError(
+                    f"Website discovery id {external_id!r} has conflicting URLs"
+                )
+            by_id[external_id] = item
+        return tuple(by_id.values())
 
     def begin_source_run(
         self,

@@ -15,6 +15,7 @@ from .acquisition import (
     AcquisitionRunner,
     JsonFileAdapter,
 )
+from .alquiler_seguro import AlquilerSeguroSource
 from .idealista import (
     MADRID_CENTER,
     IdealistaApiAdapter,
@@ -30,6 +31,7 @@ from .telegram import (
     TelegramDeliveryError,
     notifier_from_environment,
 )
+from .website_watcher import WebsiteWatcherAdapter
 
 
 def _load_environment_file(path: str | Path) -> None:
@@ -186,6 +188,35 @@ def _build_parser() -> argparse.ArgumentParser:
         default=500,
         help="hard processing limit per run (default: 500)",
     )
+    alquiler_baseline_parser = subparsers.add_parser(
+        "baseline-alquiler-seguro",
+        help="record current Alquiler Seguro inventory without sending alerts",
+    )
+    alquiler_baseline_parser.add_argument(
+        "--database",
+        default="rentals.sqlite3",
+        help="SQLite database path (default: rentals.sqlite3)",
+    )
+    alquiler_parser = subparsers.add_parser(
+        "run-alquiler-seguro",
+        help="check Alquiler Seguro for unseen listings and send matching alerts",
+    )
+    alquiler_parser.add_argument(
+        "--database",
+        default="rentals.sqlite3",
+        help="SQLite database path (default: rentals.sqlite3)",
+    )
+    alquiler_parser.add_argument(
+        "--env-file",
+        default=".env",
+        help="environment file to load when present (default: .env)",
+    )
+    alquiler_parser.add_argument(
+        "--max-listings",
+        type=int,
+        default=50,
+        help="hard processing limit per run (default: 50)",
+    )
     return parser
 
 
@@ -300,6 +331,48 @@ def main(argv: Sequence[str] | None = None) -> int:
         except AcquisitionRunError as error:
             return _report_source_failure(error)
         except (ValueError, OSError) as error:
+            print(f"Source run could not start: {error}", file=sys.stderr)
+            return 2
+        return _report_source_result(result)
+    if args.command == "baseline-alquiler-seguro":
+        try:
+            with RentalStore(args.database) as store:
+                result = WebsiteWatcherAdapter(
+                    store,
+                    AlquilerSeguroSource(),
+                ).initialize_baseline()
+        except (ValueError, OSError, RuntimeError) as error:
+            print(f"Website baseline failed: {error}", file=sys.stderr)
+            return 2
+        print(
+            json.dumps(
+                {
+                    "source_id": result.source_id,
+                    "status": "baseline_created",
+                    "discoveries_recorded": result.discoveries_recorded,
+                    "alerts_sent": 0,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    if args.command == "run-alquiler-seguro":
+        try:
+            _load_environment_file(args.env_file)
+            with RentalStore(args.database) as store:
+                notifier = notifier_from_environment(store)
+                runner = AcquisitionRunner(
+                    store,
+                    notifier,
+                    max_listings_per_run=args.max_listings,
+                )
+                result = runner.run(
+                    WebsiteWatcherAdapter(store, AlquilerSeguroSource())
+                )
+        except AcquisitionRunError as error:
+            return _report_source_failure(error)
+        except (ValueError, OSError, RuntimeError) as error:
             print(f"Source run could not start: {error}", file=sys.stderr)
             return 2
         return _report_source_result(result)

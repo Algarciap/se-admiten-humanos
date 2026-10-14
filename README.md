@@ -67,13 +67,15 @@ personal WhatsApp accounts, or send messages through unsupported portal APIs.
   run limits, and explicit `succeeded`, `empty`, and `failed` outcomes.
 - Credential-gated Idealista Search API adapter with OAuth, conservative pagination, strict response
   validation, and automatic maximum-price selection from enabled user searches.
+- Baseline-safe website-watcher framework plus a live Alquiler Seguro adapter that discovers homes
+  through the agency's public sitemap and fetches detail pages only for unseen listing IDs.
 - Machine-readable registry of portals, agencies, institutional landlords, and public housing sources.
 - Safe direct-email gate: draft by default, allow-listed agency email only for automatic sending.
 - Python regression tests plus source-registry validation.
 - Tested Telegram delivery adapter with per-user destinations, atomic claims, retries, and an
   actionable listing button; the bot and end-to-end local delivery path are working.
-- Idealista API access and quota confirmation, scheduling, and permitted agency adapters remain
-  undeployed.
+- Idealista API access and quota confirmation, scheduling, and additional permitted agency adapters
+  remain undeployed. Fotocasa is deliberately excluded from the initial deployment.
 
 ## Run locally
 
@@ -92,6 +94,10 @@ python -m se-admiten-humanos run-json-source `
   --database rentals.sqlite3
 # After Idealista approves API access and credentials are in .env:
 python -m se-admiten-humanos run-idealista --database rentals.sqlite3
+# Once only: record current Alquiler Seguro stock without sending alerts:
+python -m se_admiten_humanos baseline-alquiler-seguro --database rentals.sqlite3
+# On later checks, process and alert only on unseen listing IDs:
+python -m se_admiten_humanos run-alquiler-seguro --database rentals.sqlite3
 ```
 
 The Python package is the single source of truth. The former Google Apps Script prototype and its
@@ -123,6 +129,12 @@ The Idealista command uses only the official Search API and refuses to start wit
 credentials. It defaults to one page per run until the account-specific rate and daily limits are
 known. See [`docs/idealista-api.md`](docs/idealista-api.md) before enabling it; the project does not
 fall back to scraping Idealista pages.
+
+The Alquiler Seguro command uses the site's published dynamic sitemap for lightweight discovery and
+public detail pages only for new IDs. The separate baseline command is mandatory: it records all
+homes already online as processed and sends zero alerts, preventing a first-run flood. Empty or
+structurally changed pages fail visibly. See
+[`docs/alquiler-seguro.md`](docs/alquiler-seguro.md) before scheduling it.
 
 ## Telegram delivery
 

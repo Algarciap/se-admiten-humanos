@@ -23,13 +23,13 @@
     "base_url": "https://www.fotocasa.es/",
     "search_url": "https://www.fotocasa.es/es/alquiler/viviendas/madrid-capital/todas-las-zonas/se-aceptan-mascotas/l",
     "coverage": "Madrid city",
-    "acquisition": "native_email_alert",
-    "automation_status": "ready_after_user_setup",
+    "acquisition": "disabled_for_initial_deployment",
+    "automation_status": "deferred_by_user",
     "pet_signal": "explicit_pet_filter",
     "direct_contact": "portal_chat_or_phone",
     "evidence_url": "https://www.fotocasa.es/es/alquiler/viviendas/madrid-capital/todas-las-zonas/se-aceptan-mascotas/l",
-    "notes": "Create one pet-filtered alert and one broader alert. Do not crawl the website.",
-    "verified_on": "2026-10-13"
+    "notes": "Excluded from the initial deployment. Retained in the registry for future users and future API or permission review; do not crawl the website.",
+    "verified_on": "2026-10-14"
   },
   {
     "id": "pisos",
@@ -119,13 +119,13 @@
     "base_url": "https://www.alquilerseguro.es/",
     "search_url": "https://www.alquilerseguro.es/viviendas",
     "coverage": "Madrid city and Spain",
-    "acquisition": "native_daily_email_alert",
-    "automation_status": "ready_after_user_setup",
+    "acquisition": "public_dynamic_sitemap_watcher_with_daily_email_fallback",
+    "automation_status": "adapter_ready_baseline_required",
     "pet_signal": "description_or_agent_confirmation",
     "direct_contact": "agency_form_phone_or_email",
-    "evidence_url": "https://www.alquilerseguro.es/viviendas/avisos",
-    "notes": "High-priority direct source with configurable daily email alerts. Review the stated financial conditions before contact.",
-    "verified_on": "2026-10-13"
+    "evidence_url": "https://www.alquilerseguro.es/dynamics.xml",
+    "notes": "Primary route is its published dynamic sitemap plus public detail pages, checked conservatively after an explicit no-alert baseline. Daily email remains fallback only. Never use its disallowed API or filtered query routes.",
+    "verified_on": "2026-10-14"
   },
   {
     "id": "agencia_negociadora_alquiler",

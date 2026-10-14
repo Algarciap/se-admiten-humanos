@@ -157,13 +157,17 @@ class AcquisitionRunner:
                 eligible_matches += sum(
                     outcome.decision.eligible for outcome in processed.profile_outcomes
                 )
-                for attempt in self.notifier.deliver(processed):
+                attempts = self.notifier.deliver(processed)
+                for attempt in attempts:
                     if attempt.status == "sent":
                         sent += 1
                     elif attempt.status == "failed":
                         failed += 1
                     else:
                         skipped += 1
+                acknowledge = getattr(adapter, "acknowledge", None)
+                if acknowledge is not None:
+                    acknowledge(listing, attempts)
         except Exception as error:
             detail = f"{type(error).__name__}: {error}"[:1000]
             record = self.store.finish_source_run(

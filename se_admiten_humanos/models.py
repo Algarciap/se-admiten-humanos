@@ -50,6 +50,21 @@ class Listing:
 
 
 @dataclass(frozen=True, slots=True)
+class WebsiteDiscovery:
+    """A lightweight listing identity found on a public discovery page."""
+
+    external_id: str
+    url: str
+    source_last_modified: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.external_id.strip():
+            raise ValueError("Website discovery external id cannot be empty")
+        if not self.url.strip():
+            raise ValueError("Website discovery URL cannot be empty")
+
+
+@dataclass(frozen=True, slots=True)
 class User:
     """Application account that owns renter and search profiles."""
 

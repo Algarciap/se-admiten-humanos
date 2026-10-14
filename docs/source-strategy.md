@@ -10,10 +10,9 @@ first-party Madrid inventory:
 | Source | Why it matters | Safe acquisition route | Pet signal |
 |---|---|---|---|
 | Idealista | Largest general portal | Official API when access is approved; immediate alert as fallback | Description; unknown is not acceptance |
-| Fotocasa | Major general portal | Native alert plus pet-filtered search | Explicit pet filter |
 | Pisos.com | Major general portal | Native alert if available | Description |
 | Yaencontre | Major general portal | Personalized email alert | Description |
-| Alquiler Seguro | Rental specialist | Daily email alert | Description or written agent confirmation |
+| Alquiler Seguro | Rental specialist | Public sitemap watcher; daily email only as fallback | Description or written agent confirmation |
 | Vivenio | First-party landlord | Direct inventory/contact | Company says it is pet-friendly |
 | Testa Homes | First-party landlord | Pet filter plus direct contact | Explicit `Acepta mascotas` field |
 | Agencia Negociadora del Alquiler | Madrid rental specialist | Agency site plus its portal profile | Confirm per property |
@@ -28,6 +27,9 @@ first-party Madrid inventory:
 - RE/MAX, aProperties, and Vivienda2 for agency-owned inventory.
 - Habitaclia and Indomio for incremental portal coverage.
 - Plan Alquila as a parallel public route.
+
+Fotocasa is excluded from the initial deployment by product choice. It remains documented for future
+users, but no Fotocasa alert or parser is enabled.
 
 ## Conditional sources
 
@@ -51,7 +53,8 @@ first-party Madrid inventory:
 
 ## Direct-source observations
 
-- Alquiler Seguro exposes configurable daily emails for matching homes.
+- Alquiler Seguro publishes a dynamic sitemap of public listing URLs. The implemented watcher uses
+  it for discovery, fetches detail pages only for unseen IDs, and treats the daily email as fallback.
 - Testa Homes exposes an `Acepta mascotas` characteristic in its first-party inventory.
 - Vivenio states in its FAQ that it accepts pets subject to community rules and focuses on long-term
   rental.
@@ -64,6 +67,11 @@ These signals should be rechecked periodically because websites and policies cha
 The credential-gated Idealista Search API adapter is implemented. Until access and quotas are
 confirmed, it must not be scheduled; its native immediate alert remains the operational fallback.
 See [`idealista-api.md`](idealista-api.md) for the access request and conservative run settings.
+
+The Alquiler Seguro adapter is implemented with an explicit first-run baseline, a 2 MB response
+limit, strict first-party URL checks, and a delay between new detail-page requests. It does not use
+the site's disallowed `/api/` paths or filtered query URLs. See
+[`alquiler-seguro.md`](alquiler-seguro.md).
 
 [Vivenio's current terms](https://www.vivenio.com/terminos-condiciones) restrict monitoring and
 scraping in commercial or competitive contexts and require permission for deep linking. It remains
