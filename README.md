@@ -40,14 +40,20 @@ describe how this project itself is intended to operate.
 
 The project deliberately separates discovery, classification, notification, and outreach:
 
-1. Portal or agency native alerts arrive by email.
-2. The email is classified as `accepted`, `conditional`, `not_specified`, or `rejected`.
-3. Matching listings are deduplicated and sent to a private Telegram chat.
-4. An approved outreach message is drafted. Automatic delivery is enabled only for explicitly
+1. Source adapters look for new listings through the Idealista official API, permitted parsing of
+   public agency websites, and native email alerts where they provide useful additional coverage.
+2. Listings from every source are converted into the same normalized format.
+3. Each listing's pet policy is classified as `accepted`, `conditional`, `not_specified`, or
+   `rejected`, with the relevant phrase retained as evidence.
+4. Listings are filtered against each user's search profile and deduplicated across sources.
+5. Matching listings are sent to the correct private Telegram chat.
+6. An approved outreach message is drafted. Automatic delivery is enabled only for explicitly
    allow-listed direct agency email channels.
 
-The project does **not** crawl portals, bypass CAPTCHAs, automate personal WhatsApp accounts, or send
-messages through unsupported portal APIs.
+Idealista API access and its request limits still need to be confirmed before that adapter can go
+live. Website parsing is enabled source by source only where it is permitted and technically safe.
+The project does **not** bypass CAPTCHAs or access controls, disguise abusive traffic, automate
+personal WhatsApp accounts, or send messages through unsupported portal APIs.
 
 ## Current state
 
@@ -78,8 +84,8 @@ python -m se_admiten_humanos import-profiles `
 ```
 
 The Python package is the single source of truth. The former Google Apps Script prototype and its
-duplicated classifier, outreach, registry, and tests were removed before deployment. Email ingestion
-will be implemented as a Python adapter so all inputs follow the same tested pipeline.
+duplicated classifier, outreach, registry, and tests were removed before deployment. API, website,
+and email source adapters all feed the same tested processing pipeline.
 
 Search values are no longer application defaults. Each user can own multiple renter profiles and
 multiple searches with different cities, districts, budgets, bedroom rules, furnishing, dates, and

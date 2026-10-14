@@ -7,12 +7,12 @@
     "base_url": "https://www.idealista.com/",
     "search_url": "https://www.idealista.com/alquiler-viviendas/madrid-madrid/",
     "coverage": "Madrid city",
-    "acquisition": "native_email_alert",
-    "automation_status": "ready_after_user_setup",
+    "acquisition": "official_api_with_native_alert_fallback",
+    "automation_status": "api_access_and_quota_confirmation_required",
     "pet_signal": "description_only",
     "direct_contact": "portal_chat_or_phone",
     "evidence_url": "https://www.idealista.com/ayuda/articulos/como-recibir-alertas-de-busquedas-en-tu-email/",
-    "notes": "Use immediate saved-search emails. Do not crawl. Apply for the official Search API in parallel.",
+    "notes": "Use the official API once access and quotas are confirmed. Keep immediate saved-search emails as a fallback; do not scrape the portal.",
     "verified_on": "2026-10-13"
   },
   {

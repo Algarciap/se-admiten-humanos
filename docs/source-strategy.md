@@ -9,7 +9,7 @@ first-party Madrid inventory:
 
 | Source | Why it matters | Safe acquisition route | Pet signal |
 |---|---|---|---|
-| Idealista | Largest general portal | Immediate saved-search email | Description; unknown is not acceptance |
+| Idealista | Largest general portal | Official API when access is approved; immediate alert as fallback | Description; unknown is not acceptance |
 | Fotocasa | Major general portal | Native alert plus pet-filtered search | Explicit pet filter |
 | Pisos.com | Major general portal | Native alert if available | Description |
 | Yaencontre | Major general portal | Personalized email alert | Description |
@@ -39,8 +39,9 @@ first-party Madrid inventory:
 
 ## Acquisition rules
 
-1. Prefer a native saved-search email, RSS feed, official API, or written permission.
-2. Direct owner and agency pages without alerts remain browser bookmarks or explicit contact sources.
+1. Prefer an official API, RSS feed, native saved-search alert, or written permission.
+2. Public agency and direct-owner inventory without a timely API or alert may receive a dedicated,
+   rate-limited parser only after its terms, robots policy, and technical behavior have been reviewed.
 3. Never bypass CAPTCHAs, anti-bot controls, authentication boundaries, or robots restrictions.
 4. Never infer that a property accepts cats merely because its description is silent.
 5. Automatic email is limited to allow-listed agency domains and is disabled by default.
@@ -59,3 +60,6 @@ first-party Madrid inventory:
 - Redpiso exposes office-level phone, email, and sometimes WhatsApp contact on listings.
 
 These signals should be rechecked periodically because websites and policies change.
+
+Idealista is the first planned API adapter. Until API access and quotas are confirmed, its native
+immediate alert remains a fallback rather than the architecture for all discovery.
