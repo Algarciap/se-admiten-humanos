@@ -4,6 +4,7 @@
 coverage/
 tmp/
 *.log
+*.sqlite3
 __pycache__/
 *.py[cod]
 .pytest_cache/

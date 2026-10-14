@@ -19,11 +19,13 @@ messages through unsupported portal APIs.
 - Dependency-free Python core for classification, source recognition, contact safety, and outreach.
 - Explainable Spanish/English pet-policy classifier.
 - Configurable Spanish outreach-message generator.
+- Executable Madrid search profile: up to €950, studios included, unknown bedroom counts included.
+- SQLite listing history with conservative cross-portal deduplication and notification claims.
 - Machine-readable registry of portals, agencies, institutional landlords, and public housing sources.
 - Safe direct-email gate: draft by default, allow-listed agency email only for automatic sending.
 - Python regression tests plus source-registry validation.
-- Email ingestion, Telegram delivery, persistence, and live source adapters are the next implementation
-  milestones; none are deployed yet.
+- Email ingestion, Telegram delivery, and live source adapters are the next implementation milestones;
+  none are deployed yet.
 
 ## Run locally
 
@@ -38,6 +40,10 @@ python -m se_admiten_humanos validate-sources
 The Python package is the single source of truth. The former Google Apps Script prototype and its
 duplicated classifier, outreach, registry, and tests were removed before deployment. Email ingestion
 will be implemented as a Python adapter so all inputs follow the same tested pipeline.
+
+The current hard filters are rent at or below €950, Madrid municipality, and no explicit pet ban.
+One or more bedrooms are preferred, but studios and undisclosed bedroom counts are retained.
+Furnishing is ignored, and undisclosed availability remains eligible for manual confirmation.
 
 ## Source policy
 

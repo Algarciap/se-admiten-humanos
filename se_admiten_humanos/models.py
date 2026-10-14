@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from enum import Enum
 
 
@@ -38,9 +39,19 @@ class Listing:
     """Normalized listing fields used by classification and outreach."""
 
     source_id: str = "unknown"
+    external_id: str = ""
     title: str = ""
     price: str = ""
+    price_eur: int | None = None
     location: str = ""
+    municipality: str = ""
+    district: str = ""
+    address: str = ""
+    bedrooms: int | None = None
+    area_sqm: int | None = None
+    is_furnished: bool | None = None
+    available_from: date | None = None
+    description: str = ""
     url: str = ""
     contact_name: str = ""
     contact_email: str = ""
