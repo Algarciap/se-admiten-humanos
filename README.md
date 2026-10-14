@@ -63,12 +63,14 @@ personal WhatsApp accounts, or send messages through unsupported portal APIs.
 - Multi-user renter and search profiles with structured pets and independent preferences.
 - SQLite schema migrations, shared listing history, per-profile matches, and notification claims.
 - End-to-end listing pipeline that classifies once and evaluates every enabled search independently.
+- Auditable acquisition runner with strict normalized-JSON input, per-source execution locks, hard
+  run limits, and explicit `succeeded`, `empty`, and `failed` outcomes.
 - Machine-readable registry of portals, agencies, institutional landlords, and public housing sources.
 - Safe direct-email gate: draft by default, allow-listed agency email only for automatic sending.
 - Python regression tests plus source-registry validation.
 - Tested Telegram delivery adapter with per-user destinations, atomic claims, retries, and an
-  actionable listing button; live credentials and deployment remain pending.
-- Email ingestion and live source adapters remain undeployed.
+  actionable listing button; the bot and end-to-end local delivery path are working.
+- Idealista API and live agency website adapters remain undeployed.
 
 ## Run locally
 
@@ -80,6 +82,10 @@ python -m unittest discover -s tests -v
 python -m se_admiten_humanos validate-sources
 python -m se_admiten_humanos import-profiles `
   --file config/profiles.local.json `
+  --database rentals.sqlite3
+python -m se-admiten-humanos run-json-source `
+  --file examples/fixtures/madrid-telegram-test.json `
+  --source-id manual-fixture `
   --database rentals.sqlite3
 ```
 
@@ -101,6 +107,12 @@ forms and encrypted production storage.
 Source adapters should pass normalized listings to `ListingPipeline.process()`. The pipeline returns
 profile-specific delivery candidates but does not claim or send them; a notification adapter must
 atomically call `claim_notification()` immediately before delivery.
+
+The `run-json-source` command exercises the complete path used by future live adapters: acquire,
+normalize, classify, match, deduplicate, notify, and record the run. It loads `.env` when present and
+has a default hard limit of 500 listings per execution. The committed fixture is unmistakably marked
+as a test, but running it with live Telegram credentials sends a real message. Repeating it against
+the same database does not send a duplicate.
 
 ## Telegram delivery
 

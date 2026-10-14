@@ -6,13 +6,45 @@ import argparse
 import json
 import os
 import sys
+from pathlib import Path
 from typing import Sequence
 
+from .acquisition import AcquisitionRunError, AcquisitionRunner, JsonFileAdapter
 from .pet_policy import classify
 from .persistence import RentalStore
 from .profile_config import load_profile_bundle
 from .source_registry import default_registry
-from .telegram import TelegramBotClient, TelegramDeliveryError
+from .telegram import (
+    TelegramBotClient,
+    TelegramDeliveryError,
+    notifier_from_environment,
+)
+
+
+def _load_environment_file(path: str | Path) -> None:
+    """Load simple KEY=VALUE entries without evaluating shell syntax."""
+
+    environment_path = Path(path)
+    if not environment_path.exists():
+        return
+    for line_number, raw_line in enumerate(
+        environment_path.read_text(encoding="utf-8-sig").splitlines(), start=1
+    ):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        if "=" not in line:
+            raise ValueError(f"Invalid environment entry on line {line_number}")
+        name, value = line.split("=", 1)
+        name = name.strip()
+        value = value.strip()
+        if not name or not name.replace("_", "").isalnum():
+            raise ValueError(f"Invalid environment name on line {line_number}")
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        os.environ.setdefault(name, value)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -38,9 +70,36 @@ def _build_parser() -> argparse.ArgumentParser:
         default="rentals.sqlite3",
         help="SQLite database path (default: rentals.sqlite3)",
     )
-    subparsers.add_parser(
+    telegram_parser = subparsers.add_parser(
         "test-telegram",
         help="send a test alert using TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID",
+    )
+    telegram_parser.add_argument(
+        "--env-file",
+        default=".env",
+        help="environment file to load when present (default: .env)",
+    )
+    run_parser = subparsers.add_parser(
+        "run-json-source",
+        help="process a normalized JSON source and send matching Telegram alerts",
+    )
+    run_parser.add_argument("--file", required=True, help="normalized listing JSON")
+    run_parser.add_argument("--source-id", required=True, help="source adapter id")
+    run_parser.add_argument(
+        "--database",
+        default="rentals.sqlite3",
+        help="SQLite database path (default: rentals.sqlite3)",
+    )
+    run_parser.add_argument(
+        "--env-file",
+        default=".env",
+        help="environment file to load when present (default: .env)",
+    )
+    run_parser.add_argument(
+        "--max-listings",
+        type=int,
+        default=500,
+        help="hard safety limit per run (default: 500)",
     )
     return parser
 
@@ -82,6 +141,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 0
     if args.command == "test-telegram":
+        try:
+            _load_environment_file(args.env_file)
+        except ValueError as error:
+            print(f"Environment file is invalid: {error}", file=sys.stderr)
+            return 2
         token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
         chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
         if not token or not chat_id:
@@ -100,4 +164,44 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1
         print(f"Telegram test message sent (message id {message_id}).")
         return 0
+    if args.command == "run-json-source":
+        try:
+            _load_environment_file(args.env_file)
+            with RentalStore(args.database) as store:
+                notifier = notifier_from_environment(store)
+                runner = AcquisitionRunner(
+                    store,
+                    notifier,
+                    max_listings_per_run=args.max_listings,
+                )
+                result = runner.run(JsonFileAdapter(args.file, args.source_id))
+        except AcquisitionRunError as error:
+            record = error.record
+            print(
+                json.dumps(
+                    {
+                        "source_id": record.source_id,
+                        "status": record.status,
+                        "run_id": record.run_id,
+                        "listings_seen": record.listings_seen,
+                        "eligible_matches": record.eligible_matches,
+                        "notifications_sent": record.notifications_sent,
+                        "notifications_failed": record.notifications_failed,
+                        "notifications_skipped": record.notifications_skipped,
+                        "duration_ms": record.duration_ms,
+                        "error": record.error,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                file=sys.stderr,
+            )
+            return 1
+        except (ValueError, OSError) as error:
+            print(f"Source run could not start: {error}", file=sys.stderr)
+            return 2
+        print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+        if result.status == "already_running":
+            return 3
+        return 1 if result.status == "failed" else 0
     return 2

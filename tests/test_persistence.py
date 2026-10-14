@@ -343,9 +343,20 @@ class PersistenceTests(unittest.TestCase):
                 "select count(*) from legacy_notifications_v1"
             ).fetchone()[0]
 
-        self.assertEqual(version, 2)
+        self.assertEqual(version, 3)
         self.assertEqual(listing_count, 1)
         self.assertEqual(legacy_count, 1)
+
+    def test_source_run_claim_prevents_overlap_across_connections(self) -> None:
+        first = self.store.begin_source_run("agency-example")
+        self.assertIsNotNone(first)
+
+        with RentalStore(self.database_path) as second_store:
+            self.assertIsNone(second_store.begin_source_run("agency-example"))
+
+        assert first is not None
+        completed = self.store.finish_source_run(first.run_id, "empty")
+        self.assertEqual(completed.status, "empty")
 
     def test_conflicting_identities_fail_visibly(self) -> None:
         self.store.upsert(Listing(source_id="idealista", external_id="a"))

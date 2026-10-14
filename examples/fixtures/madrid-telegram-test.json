@@ -1,0 +1,18 @@
+{
+  "listings": [
+    {
+      "source_id": "manual-fixture",
+      "external_id": "telegram-e2e-2026-10-14",
+      "title": "[PRUEBA] Piso luminoso en Madrid",
+      "price": "900 €/mes",
+      "price_eur": 900,
+      "location": "Centro, Madrid",
+      "municipality": "Madrid",
+      "district": "Centro",
+      "bedrooms": 1,
+      "area_sqm": 45,
+      "description": "Anuncio de prueba. Se admiten mascotas. Disponible inmediatamente.",
+      "url": "https://example.com/se-admiten-humanos/prueba"
+    }
+  ]
+}

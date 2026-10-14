@@ -8,7 +8,7 @@ import re
 import sqlite3
 import unicodedata
 from dataclasses import asdict, dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -16,7 +16,7 @@ from .models import Listing, PetDecision, RenterProfile, User
 from .search_profile import SearchDecision, SearchProfile
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def _normalize_text(value: str) -> str:
@@ -136,6 +136,33 @@ class MatchResult:
     is_new: bool
 
 
+@dataclass(frozen=True, slots=True)
+class SourceRunRecord:
+    """Auditable state for one acquisition-source execution."""
+
+    run_id: int
+    source_id: str
+    status: str
+    started_at: str
+    finished_at: str | None
+    listings_seen: int
+    eligible_matches: int
+    notifications_sent: int
+    notifications_failed: int
+    notifications_skipped: int
+    error: str
+
+    @property
+    def duration_ms(self) -> int | None:
+        """Return elapsed wall time when the run has completed."""
+
+        if self.finished_at is None:
+            return None
+        started = datetime.fromisoformat(self.started_at)
+        finished = datetime.fromisoformat(self.finished_at)
+        return max(0, round((finished - started).total_seconds() * 1000))
+
+
 class RentalStore:
     """Persist global listings and user-isolated matching and delivery state."""
 
@@ -158,8 +185,12 @@ class RentalStore:
         version = self.connection.execute("pragma user_version").fetchone()[0]
         if version == 0:
             self._create_schema_v2()
+            self._migrate_v2_to_v3()
         elif version == 1:
             self._migrate_v1_to_v2()
+            self._migrate_v2_to_v3()
+        elif version == 2:
+            self._migrate_v2_to_v3()
         elif version != SCHEMA_VERSION:
             raise RuntimeError(
                 f"Unsupported database schema version {version}; expected {SCHEMA_VERSION}"
@@ -279,6 +310,173 @@ class RentalStore:
                 "alter table notifications rename to legacy_notifications_v1"
             )
         self._create_schema_v2()
+
+    def _migrate_v2_to_v3(self) -> None:
+        self.connection.executescript(
+            """
+            create table if not exists source_runs (
+                id integer primary key,
+                source_id text not null,
+                status text not null
+                    check (status in ('running', 'succeeded', 'empty', 'failed')),
+                started_at text not null,
+                finished_at text,
+                listings_seen integer not null default 0 check (listings_seen >= 0),
+                eligible_matches integer not null default 0
+                    check (eligible_matches >= 0),
+                notifications_sent integer not null default 0
+                    check (notifications_sent >= 0),
+                notifications_failed integer not null default 0
+                    check (notifications_failed >= 0),
+                notifications_skipped integer not null default 0
+                    check (notifications_skipped >= 0),
+                error text not null default ''
+            );
+
+            create unique index if not exists source_runs_one_running_idx
+                on source_runs(source_id)
+                where status = 'running';
+
+            create index if not exists source_runs_source_started_idx
+                on source_runs(source_id, started_at desc);
+
+            pragma user_version = 3;
+            """
+        )
+        self.connection.commit()
+
+    def begin_source_run(
+        self,
+        source_id: str,
+        stale_after_seconds: int = 900,
+    ) -> SourceRunRecord | None:
+        """Atomically claim a source, replacing only an abandoned stale run."""
+
+        normalized_source_id = source_id.strip().casefold()
+        if not normalized_source_id:
+            raise ValueError("Source id cannot be empty")
+        if stale_after_seconds <= 0:
+            raise ValueError("Stale-run timeout must be greater than zero")
+
+        now_datetime = datetime.now(UTC)
+        now = now_datetime.isoformat()
+        with self.connection:
+            self.connection.execute("begin immediate")
+            running = self.connection.execute(
+                """
+                select id, started_at
+                from source_runs
+                where source_id = ? and status = 'running'
+                """,
+                (normalized_source_id,),
+            ).fetchone()
+            if running is not None:
+                try:
+                    started_at = datetime.fromisoformat(str(running[1]))
+                    if started_at.tzinfo is None:
+                        started_at = started_at.replace(tzinfo=UTC)
+                except ValueError:
+                    started_at = datetime.min.replace(tzinfo=UTC)
+                if now_datetime - started_at < timedelta(seconds=stale_after_seconds):
+                    return None
+                self.connection.execute(
+                    """
+                    update source_runs
+                    set status = 'failed', finished_at = ?,
+                        error = 'Abandoned run exceeded the stale timeout'
+                    where id = ? and status = 'running'
+                    """,
+                    (now, running[0]),
+                )
+
+            cursor = self.connection.execute(
+                """
+                insert into source_runs (source_id, status, started_at)
+                values (?, 'running', ?)
+                """,
+                (normalized_source_id, now),
+            )
+            run_id = int(cursor.lastrowid)
+        return self.source_run(run_id)
+
+    def finish_source_run(
+        self,
+        run_id: int,
+        status: str,
+        *,
+        listings_seen: int = 0,
+        eligible_matches: int = 0,
+        notifications_sent: int = 0,
+        notifications_failed: int = 0,
+        notifications_skipped: int = 0,
+        error: str = "",
+    ) -> SourceRunRecord:
+        """Complete a claimed run while preserving its partial progress."""
+
+        if status not in {"succeeded", "empty", "failed"}:
+            raise ValueError("Completed source-run status is invalid")
+        counts = (
+            listings_seen,
+            eligible_matches,
+            notifications_sent,
+            notifications_failed,
+            notifications_skipped,
+        )
+        if any(value < 0 for value in counts):
+            raise ValueError("Source-run counts cannot be negative")
+        with self.connection:
+            cursor = self.connection.execute(
+                """
+                update source_runs
+                set status = ?, finished_at = ?, listings_seen = ?,
+                    eligible_matches = ?, notifications_sent = ?,
+                    notifications_failed = ?, notifications_skipped = ?, error = ?
+                where id = ? and status = 'running'
+                """,
+                (
+                    status,
+                    _utc_now(),
+                    listings_seen,
+                    eligible_matches,
+                    notifications_sent,
+                    notifications_failed,
+                    notifications_skipped,
+                    error[:1000],
+                    run_id,
+                ),
+            )
+        if cursor.rowcount != 1:
+            raise RuntimeError("Source run must be active before it can be completed")
+        return self.source_run(run_id)
+
+    def source_run(self, run_id: int) -> SourceRunRecord:
+        """Read one source run for diagnostics and monitoring."""
+
+        row = self.connection.execute(
+            """
+            select id, source_id, status, started_at, finished_at, listings_seen,
+                eligible_matches, notifications_sent, notifications_failed,
+                notifications_skipped, error
+            from source_runs
+            where id = ?
+            """,
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"Unknown source run: {run_id}")
+        return SourceRunRecord(
+            run_id=int(row[0]),
+            source_id=str(row[1]),
+            status=str(row[2]),
+            started_at=str(row[3]),
+            finished_at=str(row[4]) if row[4] is not None else None,
+            listings_seen=int(row[5]),
+            eligible_matches=int(row[6]),
+            notifications_sent=int(row[7]),
+            notifications_failed=int(row[8]),
+            notifications_skipped=int(row[9]),
+            error=str(row[10]),
+        )
 
     def save_user(self, user: User) -> None:
         """Create or update an application account."""
