@@ -1,0 +1,47 @@
+{
+  "user": {
+    "id": "user-example",
+    "display_name": "Example user",
+    "email": ""
+  },
+  "renter_profiles": [
+    {
+      "id": "renter-example",
+      "user_id": "user-example",
+      "label": "Primary renter",
+      "sender_name": "Sender name",
+      "renter_name": "Renter name",
+      "monthly_income_eur": null,
+      "job": "",
+      "contract_type": "",
+      "pets": [
+        {
+          "id": "pet-example",
+          "species": "gato",
+          "count": 1,
+          "name": "",
+          "notes": ""
+        }
+      ]
+    }
+  ],
+  "search_profiles": [
+    {
+      "id": "search-example",
+      "user_id": "user-example",
+      "renter_profile_id": "renter-example",
+      "name": "My search",
+      "max_rent_eur": 1000,
+      "municipality": "Madrid",
+      "acceptable_districts": [],
+      "preferred_min_bedrooms": 1,
+      "allow_studios": true,
+      "allow_unknown_bedrooms": true,
+      "furnished": null,
+      "move_in_asap": true,
+      "move_in_by": null,
+      "requires_pet_acceptance": true,
+      "enabled": true
+    }
+  ]
+}

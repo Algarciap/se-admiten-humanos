@@ -8,6 +8,8 @@ import sys
 from typing import Sequence
 
 from .pet_policy import classify
+from .persistence import RentalStore
+from .profile_config import load_profile_bundle
 from .source_registry import default_registry
 
 
@@ -15,10 +17,24 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="se-admiten-humanos")
     subparsers = parser.add_subparsers(dest="command", required=True)
     classify_parser = subparsers.add_parser("classify", help="classify pet-policy text")
-    classify_parser.add_argument("text", nargs="?", help="text to classify; stdin is used if omitted")
+    classify_parser.add_argument(
+        "text",
+        nargs="?",
+        help="text to classify; stdin is used if omitted",
+    )
     subparsers.add_parser(
         "validate-sources",
         help="validate the source registry and report its source count",
+    )
+    import_parser = subparsers.add_parser(
+        "import-profiles",
+        help="import a private user/profile bundle into the local database",
+    )
+    import_parser.add_argument("--file", required=True, help="private profile JSON file")
+    import_parser.add_argument(
+        "--database",
+        default="rentals.sqlite3",
+        help="SQLite database path (default: rentals.sqlite3)",
     )
     return parser
 
@@ -35,8 +51,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "source": decision.source,
                     "evidence": decision.evidence,
                     "confidence": decision.confidence,
-                    "should_notify": decision.should_notify,
-                    "should_contact": decision.should_contact,
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -46,5 +60,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "validate-sources":
         registry = default_registry()
         print(f"Validated {registry.count} sources.")
+        return 0
+    if args.command == "import-profiles":
+        bundle = load_profile_bundle(args.file)
+        with RentalStore(args.database) as store:
+            store.save_user(bundle.user)
+            for renter_profile in bundle.renter_profiles:
+                store.save_renter_profile(renter_profile)
+            for search_profile in bundle.search_profiles:
+                store.save_search_profile(search_profile)
+        print(
+            f"Imported user {bundle.user.id}: "
+            f"{len(bundle.renter_profiles)} renter profile(s), "
+            f"{len(bundle.search_profiles)} search profile(s)."
+        )
         return 0
     return 2

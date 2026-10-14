@@ -1,22 +1,77 @@
 """Tests for SQLite storage, deduplication, and notification claims."""
 
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 
-from se_admiten_humanos.models import Listing
-from se_admiten_humanos.persistence import ListingStore, canonicalize_url
+from se_admiten_humanos.models import Listing, Pet, RenterProfile, User
+from se_admiten_humanos.persistence import RentalStore, canonicalize_url
+from se_admiten_humanos.pet_policy import classify
+from se_admiten_humanos.search_profile import SearchProfile, evaluate_listing
 
 
 class PersistenceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_directory = tempfile.TemporaryDirectory()
         self.database_path = Path(self.temp_directory.name) / "rentals.sqlite3"
-        self.store = ListingStore(self.database_path)
+        self.store = RentalStore(self.database_path)
+        self.user = User(id="user-1", display_name="First user")
+        self.renter_profile = RenterProfile(
+            id="renter-1",
+            user_id=self.user.id,
+            label="Primary renter",
+            sender_name="Sender",
+            renter_name="Renter",
+            monthly_income_eur=2500,
+            job="production professional",
+            contract_type="contrato indefinido",
+            pets=(Pet(id="pet-1", species="gato", count=2),),
+        )
+        self.search_profile = SearchProfile(
+            id="search-1",
+            user_id=self.user.id,
+            name="Madrid",
+            max_rent_eur=950,
+            municipality="Madrid",
+            renter_profile_id=self.renter_profile.id,
+            requires_pet_acceptance=True,
+        )
+        self.store.save_user(self.user)
+        self.store.save_renter_profile(self.renter_profile)
+        self.store.save_search_profile(self.search_profile)
 
     def tearDown(self) -> None:
         self.store.close()
         self.temp_directory.cleanup()
+
+    def _record_eligible_match(
+        self,
+        external_id: str = "123",
+        profile: SearchProfile | None = None,
+    ) -> int:
+        selected_profile = profile or self.search_profile
+        listing = Listing(
+            source_id="idealista",
+            external_id=external_id,
+            price_eur=900,
+            municipality="Madrid",
+            bedrooms=1,
+        )
+        stored = self.store.upsert(listing)
+        pet_decision = classify("")
+        search_decision = evaluate_listing(
+            listing,
+            pet_decision,
+            selected_profile,
+        )
+        match = self.store.record_match(
+            stored.listing_id,
+            selected_profile.id,
+            search_decision,
+            pet_decision,
+        )
+        return match.match_id
 
     def test_repeated_source_id_is_one_listing(self) -> None:
         listing = Listing(source_id="idealista", external_id="123", title="Original")
@@ -129,23 +184,168 @@ class PersistenceTests(unittest.TestCase):
         self.assertNotEqual(first.listing_id, second.listing_id)
 
     def test_notification_is_claimed_once_and_failed_delivery_can_retry(self) -> None:
-        stored = self.store.upsert(Listing(source_id="idealista", external_id="123"))
+        match_id = self._record_eligible_match()
 
-        self.assertTrue(self.store.claim_notification(stored.listing_id, "telegram"))
-        self.assertFalse(self.store.claim_notification(stored.listing_id, "telegram"))
-        self.store.mark_notification_failed(stored.listing_id, "telegram", "timeout")
-        self.assertTrue(self.store.claim_notification(stored.listing_id, "telegram"))
-        self.store.mark_notification_sent(stored.listing_id, "telegram")
-        self.assertFalse(self.store.claim_notification(stored.listing_id, "telegram"))
+        self.assertTrue(self.store.claim_notification(match_id, "telegram"))
+        self.assertFalse(self.store.claim_notification(match_id, "telegram"))
+        self.store.mark_notification_failed(match_id, "telegram", "timeout")
+        self.assertTrue(self.store.claim_notification(match_id, "telegram"))
+        self.store.mark_notification_sent(match_id, "telegram")
+        self.assertFalse(self.store.claim_notification(match_id, "telegram"))
 
     def test_notification_claim_is_visible_to_another_store(self) -> None:
-        stored = self.store.upsert(Listing(source_id="idealista", external_id="123"))
-        self.assertTrue(self.store.claim_notification(stored.listing_id, "telegram"))
+        match_id = self._record_eligible_match()
+        self.assertTrue(self.store.claim_notification(match_id, "telegram"))
 
-        with ListingStore(self.database_path) as second_store:
-            self.assertFalse(
-                second_store.claim_notification(stored.listing_id, "telegram")
-            )
+        with RentalStore(self.database_path) as second_store:
+            self.assertFalse(second_store.claim_notification(match_id, "telegram"))
+
+    def test_same_listing_notifies_two_profiles_independently(self) -> None:
+        second_user = User(id="user-2", display_name="Second user")
+        second_profile = SearchProfile(
+            id="search-2",
+            user_id=second_user.id,
+            name="Madrid flexible",
+            max_rent_eur=1200,
+            municipality="Madrid",
+        )
+        self.store.save_user(second_user)
+        self.store.save_search_profile(second_profile)
+
+        first_match_id = self._record_eligible_match()
+        second_match_id = self._record_eligible_match(profile=second_profile)
+
+        self.assertNotEqual(first_match_id, second_match_id)
+        self.assertTrue(self.store.claim_notification(first_match_id, "telegram"))
+        self.assertTrue(self.store.claim_notification(second_match_id, "telegram"))
+        self.assertFalse(self.store.claim_notification(first_match_id, "telegram"))
+
+    def test_profile_round_trip_preserves_user_preferences(self) -> None:
+        profile = SearchProfile(
+            id="search-districts",
+            user_id=self.user.id,
+            name="Selected districts",
+            max_rent_eur=1400,
+            municipality="Madrid",
+            acceptable_districts=("Centro", "Chamberí"),
+            preferred_min_bedrooms=2,
+            allow_studios=False,
+            allow_unknown_bedrooms=False,
+            furnished=True,
+            move_in_asap=False,
+            requires_pet_acceptance=True,
+        )
+
+        self.store.save_search_profile(profile)
+
+        self.assertEqual(self.store.load_search_profile(profile.id), profile)
+
+    def test_renter_profile_cannot_be_shared_across_users(self) -> None:
+        second_user = User(id="user-2", display_name="Second user")
+        self.store.save_user(second_user)
+        invalid_profile = SearchProfile(
+            id="invalid-search",
+            user_id=second_user.id,
+            name="Invalid",
+            max_rent_eur=1000,
+            municipality="Madrid",
+            renter_profile_id=self.renter_profile.id,
+        )
+
+        with self.assertRaisesRegex(ValueError, "different user"):
+            self.store.save_search_profile(invalid_profile)
+
+    def test_existing_profile_cannot_be_moved_to_another_user(self) -> None:
+        second_user = User(id="user-2", display_name="Second user")
+        self.store.save_user(second_user)
+        moved_profile = SearchProfile(
+            id=self.search_profile.id,
+            user_id=second_user.id,
+            name="Moved search",
+            max_rent_eur=1000,
+            municipality="Madrid",
+        )
+
+        with self.assertRaisesRegex(ValueError, "ownership"):
+            self.store.save_search_profile(moved_profile)
+
+    def test_ineligible_match_cannot_be_notified(self) -> None:
+        listing = Listing(
+            source_id="idealista",
+            external_id="over-budget",
+            price_eur=1200,
+            municipality="Madrid",
+        )
+        stored = self.store.upsert(listing)
+        pet_decision = classify("")
+        search_decision = evaluate_listing(
+            listing,
+            pet_decision,
+            self.search_profile,
+        )
+        match = self.store.record_match(
+            stored.listing_id,
+            self.search_profile.id,
+            search_decision,
+            pet_decision,
+        )
+
+        with self.assertRaisesRegex(ValueError, "ineligible"):
+            self.store.claim_notification(match.match_id, "telegram")
+
+    def test_v1_database_migrates_without_losing_legacy_records(self) -> None:
+        legacy_path = Path(self.temp_directory.name) / "legacy.sqlite3"
+        connection = sqlite3.connect(legacy_path)
+        connection.executescript(
+            """
+            create table listings (
+                id integer primary key,
+                fingerprint text not null unique,
+                source_id text not null,
+                external_id text not null,
+                canonical_url text not null,
+                payload_json text not null,
+                first_seen_at text not null,
+                last_seen_at text not null
+            );
+            create table listing_identities (
+                identity text primary key,
+                listing_id integer not null references listings(id) on delete cascade,
+                identity_kind text not null
+            );
+            create table notifications (
+                listing_id integer not null references listings(id) on delete cascade,
+                channel text not null,
+                status text not null,
+                attempts integer not null default 1,
+                last_error text not null default '',
+                updated_at text not null,
+                primary key (listing_id, channel)
+            );
+            insert into listings values (
+                1, 'fingerprint', 'idealista', '123', '', '{}',
+                '2026-10-13T00:00:00+00:00', '2026-10-13T00:00:00+00:00'
+            );
+            insert into notifications values (
+                1, 'telegram', 'sent', 1, '', '2026-10-13T00:00:00+00:00'
+            );
+            pragma user_version = 1;
+            """
+        )
+        connection.close()
+
+        with RentalStore(legacy_path) as migrated:
+            version = migrated.connection.execute("pragma user_version").fetchone()[0]
+            listing_count = migrated.connection.execute(
+                "select count(*) from listings"
+            ).fetchone()[0]
+            legacy_count = migrated.connection.execute(
+                "select count(*) from legacy_notifications_v1"
+            ).fetchone()[0]
+
+        self.assertEqual(version, 2)
+        self.assertEqual(listing_count, 1)
+        self.assertEqual(legacy_count, 1)
 
     def test_conflicting_identities_fail_visibly(self) -> None:
         self.store.upsert(Listing(source_id="idealista", external_id="a"))

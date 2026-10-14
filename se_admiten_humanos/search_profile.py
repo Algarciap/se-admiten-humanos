@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import unicodedata
 from dataclasses import dataclass
+from datetime import date
 
 from .models import Listing, PetDecision, PetStatus
 
@@ -18,23 +19,45 @@ def _normalize_place(value: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class SearchProfile:
-    """Hard filters and preferences for the current Madrid search."""
+    """User-owned hard filters and preferences for one reusable search."""
 
-    max_rent_eur: int = 950
-    municipality: str = "Madrid"
+    id: str
+    user_id: str
+    name: str
+    max_rent_eur: int
+    municipality: str
+    renter_profile_id: str | None = None
+    acceptable_districts: tuple[str, ...] = ()
     preferred_min_bedrooms: int = 1
     allow_studios: bool = True
     allow_unknown_bedrooms: bool = True
     furnished: bool | None = None
     move_in_asap: bool = True
+    move_in_by: date | None = None
+    requires_pet_acceptance: bool = False
+    enabled: bool = True
 
     def __post_init__(self) -> None:
+        required = {
+            "Search profile id": self.id,
+            "User id": self.user_id,
+            "Search profile name": self.name,
+            "Municipality": self.municipality,
+        }
+        for field_name, value in required.items():
+            if not value.strip():
+                raise ValueError(f"{field_name} cannot be empty")
         if self.max_rent_eur <= 0:
             raise ValueError("Maximum rent must be greater than zero")
         if self.preferred_min_bedrooms < 0:
             raise ValueError("Preferred bedroom count cannot be negative")
-        if not self.municipality.strip():
-            raise ValueError("Municipality cannot be empty")
+        normalized_districts = [
+            _normalize_place(value) for value in self.acceptable_districts
+        ]
+        if any(not district for district in normalized_districts):
+            raise ValueError("Acceptable districts cannot contain empty values")
+        if len(normalized_districts) != len(set(normalized_districts)):
+            raise ValueError("Acceptable districts must be unique")
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,61 +69,76 @@ class SearchDecision:
     preference_notes: tuple[str, ...]
 
 
-MADRID_ALIASES = frozenset({"madrid", "madrid capital", "madrid ciudad"})
-
-
 def evaluate_listing(
     listing: Listing,
     pet_decision: PetDecision,
-    profile: SearchProfile | None = None,
+    profile: SearchProfile,
 ) -> SearchDecision:
     """Apply hard filters without turning preferences into false exclusions."""
 
-    selected_profile = profile or SearchProfile()
     rejections: list[str] = []
     notes: list[str] = []
 
+    if not profile.enabled:
+        rejections.append("profile_disabled")
+
     if listing.price_eur is None:
         rejections.append("rent_not_disclosed")
-    elif listing.price_eur > selected_profile.max_rent_eur:
+    elif listing.price_eur > profile.max_rent_eur:
         rejections.append("rent_above_maximum")
 
-    expected_municipality = _normalize_place(selected_profile.municipality)
+    expected_municipality = _normalize_place(profile.municipality)
     actual_municipality = _normalize_place(listing.municipality)
-    accepted_places = (
-        MADRID_ALIASES
-        if expected_municipality == "madrid"
-        else {expected_municipality}
-    )
+    accepted_places = {
+        expected_municipality,
+        f"{expected_municipality} capital",
+        f"{expected_municipality} ciudad",
+    }
     if not actual_municipality:
         rejections.append("municipality_not_disclosed")
     elif actual_municipality not in accepted_places:
-        rejections.append("outside_madrid_city")
+        rejections.append("outside_selected_municipality")
 
-    if pet_decision.status is PetStatus.REJECTED:
+    if profile.acceptable_districts:
+        actual_district = _normalize_place(listing.district)
+        accepted_districts = {
+            _normalize_place(district) for district in profile.acceptable_districts
+        }
+        if not actual_district:
+            rejections.append("district_not_disclosed")
+        elif actual_district not in accepted_districts:
+            rejections.append("outside_selected_districts")
+
+    if profile.requires_pet_acceptance and pet_decision.status is PetStatus.REJECTED:
         rejections.append("pets_rejected")
 
     if listing.bedrooms is None:
-        if selected_profile.allow_unknown_bedrooms:
+        if profile.allow_unknown_bedrooms:
             notes.append("bedrooms_not_disclosed")
         else:
             rejections.append("bedrooms_not_disclosed")
     elif listing.bedrooms == 0:
-        if selected_profile.allow_studios:
+        if profile.allow_studios:
             notes.append("studio")
         else:
             rejections.append("studio")
-    elif listing.bedrooms < selected_profile.preferred_min_bedrooms:
+    elif listing.bedrooms < profile.preferred_min_bedrooms:
         notes.append("below_preferred_bedrooms")
 
-    if selected_profile.furnished is not None:
+    if profile.furnished is not None:
         if listing.is_furnished is None:
             notes.append("furnished_status_not_disclosed")
-        elif listing.is_furnished is not selected_profile.furnished:
+        elif listing.is_furnished is not profile.furnished:
             rejections.append("furnished_status_mismatch")
 
-    if selected_profile.move_in_asap and listing.available_from is None:
+    if profile.move_in_asap and listing.available_from is None:
         notes.append("availability_not_disclosed")
+    if (
+        profile.move_in_by is not None
+        and listing.available_from is not None
+        and listing.available_from > profile.move_in_by
+    ):
+        rejections.append("available_too_late")
 
     return SearchDecision(
         eligible=not rejections,

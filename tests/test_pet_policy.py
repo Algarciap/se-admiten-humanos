@@ -36,10 +36,9 @@ class PetPolicyTests(unittest.TestCase):
         self.assertIs(classify("", True).status, PetStatus.ACCEPTED)
         self.assertIs(classify("Se aceptan mascotas", False).status, PetStatus.REJECTED)
 
-    def test_rejected_decision_suppresses_notification_and_contact(self) -> None:
+    def test_rejected_decision_reports_an_explicit_pet_ban(self) -> None:
         decision = classify("No se admiten mascotas")
-        self.assertFalse(decision.should_notify)
-        self.assertFalse(decision.should_contact)
+        self.assertIs(decision.status, PetStatus.REJECTED)
 
     def test_evidence_preserves_the_matching_phrase(self) -> None:
         decision = classify("Piso exterior. Mascotas a consultar con la propiedad.")

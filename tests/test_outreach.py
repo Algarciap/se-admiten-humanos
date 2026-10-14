@@ -2,7 +2,7 @@
 
 import unittest
 
-from se_admiten_humanos.models import Listing, RenterProfile
+from se_admiten_humanos.models import Listing, Pet, RenterProfile
 from se_admiten_humanos.outreach import build_message, subject
 from se_admiten_humanos.pet_policy import classify
 
@@ -10,11 +10,15 @@ from se_admiten_humanos.pet_policy import classify
 class OutreachTests(unittest.TestCase):
     def setUp(self) -> None:
         self.profile = RenterProfile(
+            id="renter-1",
+            user_id="user-1",
+            label="Persona interesada",
             sender_name="Persona remitente",
             renter_name="Persona interesada",
-            monthly_income="2500",
+            monthly_income_eur=2500,
             job="profesional de producción",
-            pets="dos gatos",
+            contract_type="contrato indefinido",
+            pets=(Pet(id="cats", species="gato", count=2),),
         )
         self.listing = Listing(
             title="Piso en Chamberí",
@@ -41,6 +45,20 @@ class OutreachTests(unittest.TestCase):
             subject(self.listing),
             "Interés en alquiler: Piso en Chamberí · 1.250 € · Madrid",
         )
+
+    def test_pet_free_profile_does_not_ask_about_pets(self) -> None:
+        profile = RenterProfile(
+            id="renter-2",
+            user_id="user-2",
+            label="No pets",
+            sender_name="Sender",
+            renter_name="Renter",
+        )
+
+        message = build_message(self.listing, classify(""), profile)
+
+        self.assertIn("No viviría con mascotas", message)
+        self.assertNotIn("si se admiten", message)
 
 
 if __name__ == "__main__":

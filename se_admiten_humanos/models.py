@@ -25,14 +25,6 @@ class PetDecision:
     evidence: str
     confidence: float
 
-    @property
-    def should_notify(self) -> bool:
-        return self.status is not PetStatus.REJECTED
-
-    @property
-    def should_contact(self) -> bool:
-        return self.status is not PetStatus.REJECTED
-
 
 @dataclass(frozen=True, slots=True)
 class Listing:
@@ -58,11 +50,66 @@ class Listing:
 
 
 @dataclass(frozen=True, slots=True)
-class RenterProfile:
-    """Private renter details supplied at runtime, never committed as defaults."""
+class User:
+    """Application account that owns renter and search profiles."""
 
+    id: str
+    display_name: str
+    email: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.id.strip():
+            raise ValueError("User id cannot be empty")
+        if not self.display_name.strip():
+            raise ValueError("User display name cannot be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class Pet:
+    """Structured pet details used by matching and outreach."""
+
+    id: str
+    species: str
+    count: int = 1
+    name: str = ""
+    notes: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.id.strip():
+            raise ValueError("Pet id cannot be empty")
+        if not self.species.strip():
+            raise ValueError("Pet species cannot be empty")
+        if self.count <= 0:
+            raise ValueError("Pet count must be greater than zero")
+
+
+@dataclass(frozen=True, slots=True)
+class RenterProfile:
+    """Private outreach details owned by one user."""
+
+    id: str
+    user_id: str
+    label: str
     sender_name: str
     renter_name: str
-    monthly_income: str
-    job: str
-    pets: str
+    monthly_income_eur: int | None = None
+    job: str = ""
+    contract_type: str = ""
+    pets: tuple[Pet, ...] = ()
+
+    def __post_init__(self) -> None:
+        required = {
+            "Renter profile id": self.id,
+            "User id": self.user_id,
+            "Profile label": self.label,
+            "Sender name": self.sender_name,
+            "Renter name": self.renter_name,
+        }
+        for field_name, value in required.items():
+            if not value.strip():
+                raise ValueError(f"{field_name} cannot be empty")
+        if self.monthly_income_eur is not None and self.monthly_income_eur <= 0:
+            raise ValueError("Monthly income must be greater than zero")
+        pet_ids = [pet.id for pet in self.pets]
+        if len(pet_ids) != len(set(pet_ids)):
+            raise ValueError("Pet ids must be unique within a renter profile")

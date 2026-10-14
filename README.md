@@ -19,8 +19,8 @@ messages through unsupported portal APIs.
 - Dependency-free Python core for classification, source recognition, contact safety, and outreach.
 - Explainable Spanish/English pet-policy classifier.
 - Configurable Spanish outreach-message generator.
-- Executable Madrid search profile: up to €950, studios included, unknown bedroom counts included.
-- SQLite listing history with conservative cross-portal deduplication and notification claims.
+- Multi-user renter and search profiles with structured pets and independent preferences.
+- SQLite schema migrations, shared listing history, per-profile matches, and notification claims.
 - Machine-readable registry of portals, agencies, institutional landlords, and public housing sources.
 - Safe direct-email gate: draft by default, allow-listed agency email only for automatic sending.
 - Python regression tests plus source-registry validation.
@@ -35,15 +35,25 @@ Python 3.11 or newer is required.
 python -m unittest discover -s tests -v
 "No se mencionan mascotas" | python -m se_admiten_humanos classify
 python -m se_admiten_humanos validate-sources
+python -m se_admiten_humanos import-profiles `
+  --file config/profiles.local.json `
+  --database rentals.sqlite3
 ```
 
 The Python package is the single source of truth. The former Google Apps Script prototype and its
 duplicated classifier, outreach, registry, and tests were removed before deployment. Email ingestion
 will be implemented as a Python adapter so all inputs follow the same tested pipeline.
 
-The current hard filters are rent at or below €950, Madrid municipality, and no explicit pet ban.
-One or more bedrooms are preferred, but studios and undisclosed bedroom counts are retained.
-Furnishing is ignored, and undisclosed availability remains eligible for manual confirmation.
+Search values are no longer application defaults. Each user can own multiple renter profiles and
+multiple searches with different cities, districts, budgets, bedroom rules, furnishing, dates, and
+pet requirements. Listings are stored once globally; matching and notification state are isolated
+per search profile so one person's alert never suppresses another person's.
+
+Copy `config/profiles.local.example.json` to `config/profiles.local.json` for private local setup.
+The local file is ignored by Git because it may contain names, income, employment, and pet details.
+The SQLite database is also ignored and should be treated as private because this development version
+stores those fields in plaintext. The future website will replace the JSON import with authenticated
+forms and encrypted production storage.
 
 ## Source policy
 
