@@ -8,7 +8,10 @@ version = "0.5.0"
 description = "Explainable pet-friendly rental alerts with safe outreach workflows."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "Proprietary" }
+license = { text = "AGPL-3.0-or-later" }
+classifiers = [
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+]
 dependencies = []
 
 [project.scripts]

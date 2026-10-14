@@ -30,6 +30,12 @@ There are no subscriptions, referral commissions, affiliate links, paid listings
 personal-data resale. No agency or landlord can pay to appear first. The goal is simply to make a
 stressful and unequal search a little more manageable.
 
+The code is licensed under the [GNU Affero General Public License v3 or later](LICENSE). That means
+people may use, study, share, and modify it. If someone modifies the software and makes that version
+available to users over a network, those users must also be offered access to its corresponding
+source code. Like other open-source licenses, the AGPL permits commercial use; the commitments above
+describe how this project itself is intended to operate.
+
 ## How it works
 
 The project deliberately separates discovery, classification, notification, and outreach:
