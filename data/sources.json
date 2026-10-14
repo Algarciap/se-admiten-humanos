@@ -8,12 +8,12 @@
     "search_url": "https://www.idealista.com/alquiler-viviendas/madrid-madrid/",
     "coverage": "Madrid city",
     "acquisition": "official_api_with_native_alert_fallback",
-    "automation_status": "api_access_and_quota_confirmation_required",
+    "automation_status": "adapter_ready_access_and_quota_confirmation_required",
     "pet_signal": "description_only",
     "direct_contact": "portal_chat_or_phone",
     "evidence_url": "https://www.idealista.com/ayuda/articulos/como-recibir-alertas-de-busquedas-en-tu-email/",
-    "notes": "Use the official API once access and quotas are confirmed. Keep immediate saved-search emails as a fallback; do not scrape the portal.",
-    "verified_on": "2026-10-13"
+    "notes": "The credential-gated official API adapter is implemented with a one-page default. Request access and confirm quotas before scheduling it. Keep immediate saved-search emails as a fallback; do not scrape the portal.",
+    "verified_on": "2026-10-14"
   },
   {
     "id": "fotocasa",
@@ -152,12 +152,12 @@
     "search_url": "https://www.testahomes.com/",
     "coverage": "Madrid city and region",
     "acquisition": "pet_filter_and_direct_contact",
-    "automation_status": "manual_watch_until_permission",
+    "automation_status": "written_permission_required_for_monitoring",
     "pet_signal": "explicit_pet_filter",
     "direct_contact": "agency_form_phone_or_email",
     "evidence_url": "https://www.testahomes.com/",
-    "notes": "Excellent cat-friendly source: the first-party search includes an Acepta mascotas characteristic.",
-    "verified_on": "2026-10-13"
+    "notes": "Excellent cat-friendly source: the first-party search includes an Acepta mascotas characteristic. Keep background parsing disabled until written permission clarifies the permitted automated use.",
+    "verified_on": "2026-10-14"
   },
   {
     "id": "vivenio",
@@ -168,12 +168,12 @@
     "search_url": "https://www.vivenio.com/edificios",
     "coverage": "Madrid city and region",
     "acquisition": "direct_inventory_and_contact",
-    "automation_status": "manual_watch_until_permission",
+    "automation_status": "written_permission_required_for_monitoring",
     "pet_signal": "company_wide_pet_friendly_policy",
     "direct_contact": "contact_form_phone_or_email",
     "evidence_url": "https://www.vivenio.com/preguntas-frecuentes",
-    "notes": "Top-priority source because Vivenio explicitly states it accepts pets, subject to community rules.",
-    "verified_on": "2026-10-13"
+    "notes": "Top-priority source because Vivenio explicitly states it accepts pets, subject to community rules. Keep it manual until written monitoring and deep-link permission is obtained under its current terms.",
+    "verified_on": "2026-10-14"
   },
   {
     "id": "nestar",

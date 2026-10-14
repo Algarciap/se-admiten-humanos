@@ -1,6 +1,6 @@
 # Madrid source strategy
 
-Verified on 2026-10-13. This is an operational registry, not an endorsement of any company.
+Last reviewed on 2026-10-14. This is an operational registry, not an endorsement of any company.
 
 ## First wave
 
@@ -61,5 +61,15 @@ first-party Madrid inventory:
 
 These signals should be rechecked periodically because websites and policies change.
 
-Idealista is the first planned API adapter. Until API access and quotas are confirmed, its native
-immediate alert remains a fallback rather than the architecture for all discovery.
+The credential-gated Idealista Search API adapter is implemented. Until access and quotas are
+confirmed, it must not be scheduled; its native immediate alert remains the operational fallback.
+See [`idealista-api.md`](idealista-api.md) for the access request and conservative run settings.
+
+[Vivenio's current terms](https://www.vivenio.com/terminos-condiciones) restrict monitoring and
+scraping in commercial or competitive contexts and require permission for deep linking. It remains
+manual until written permission is obtained; the project does not infer that public visibility alone
+authorizes a background parser.
+
+[Testa Homes' current conditions](https://www.testahomes.com/condiciones-de-uso/) do not provide a
+clear grant for recurring automated extraction. Its pet filter remains valuable for manual searches,
+but a background adapter also waits for written permission.

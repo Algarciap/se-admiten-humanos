@@ -65,12 +65,15 @@ personal WhatsApp accounts, or send messages through unsupported portal APIs.
 - End-to-end listing pipeline that classifies once and evaluates every enabled search independently.
 - Auditable acquisition runner with strict normalized-JSON input, per-source execution locks, hard
   run limits, and explicit `succeeded`, `empty`, and `failed` outcomes.
+- Credential-gated Idealista Search API adapter with OAuth, conservative pagination, strict response
+  validation, and automatic maximum-price selection from enabled user searches.
 - Machine-readable registry of portals, agencies, institutional landlords, and public housing sources.
 - Safe direct-email gate: draft by default, allow-listed agency email only for automatic sending.
 - Python regression tests plus source-registry validation.
 - Tested Telegram delivery adapter with per-user destinations, atomic claims, retries, and an
   actionable listing button; the bot and end-to-end local delivery path are working.
-- Idealista API and live agency website adapters remain undeployed.
+- Idealista API access and quota confirmation, scheduling, and permitted agency adapters remain
+  undeployed.
 
 ## Run locally
 
@@ -87,6 +90,8 @@ python -m se-admiten-humanos run-json-source `
   --file examples/fixtures/madrid-telegram-test.json `
   --source-id manual-fixture `
   --database rentals.sqlite3
+# After Idealista approves API access and credentials are in .env:
+python -m se-admiten-humanos run-idealista --database rentals.sqlite3
 ```
 
 The Python package is the single source of truth. The former Google Apps Script prototype and its
@@ -113,6 +118,11 @@ normalize, classify, match, deduplicate, notify, and record the run. It loads `.
 has a default hard limit of 500 listings per execution. The committed fixture is unmistakably marked
 as a test, but running it with live Telegram credentials sends a real message. Repeating it against
 the same database does not send a duplicate.
+
+The Idealista command uses only the official Search API and refuses to start without approved
+credentials. It defaults to one page per run until the account-specific rate and daily limits are
+known. See [`docs/idealista-api.md`](docs/idealista-api.md) before enabling it; the project does not
+fall back to scraping Idealista pages.
 
 ## Telegram delivery
 
