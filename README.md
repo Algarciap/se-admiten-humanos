@@ -1,7 +1,36 @@
 # Se admiten humanos
 
-Open-source tooling for finding long-term rentals where every member of the family is welcome,
-including pets.
+A free and open-source project for helping people find long-term rentals where every member of the
+household—including pets—is welcome.
+
+## Why this exists
+
+Finding somewhere to live can become an exhausting race. Affordable homes receive attention almost
+immediately, the same property appears on several portals, listings disappear quickly, alerts can
+arrive too late, and pet policies are often missing or buried in free text.
+
+This project began while I was helping someone close to me whose living situation had suddenly
+become untenable. She needed to find a home in Madrid quickly, depended on public transport, and
+would be moving with two cats. At a moment that was already emotionally difficult, repeatedly
+refreshing property portals, comparing duplicated adverts, and asking the same question about pets
+again and again became another full-time burden.
+
+`Se admiten humanos` cannot create more housing or make rents affordable. Its purpose is narrower
+and practical: reduce repetitive searching, detect promising listings sooner, explain what each
+advert actually says about pets, and help someone respond quickly—without ever pretending that
+silence about pets means acceptance.
+
+## Free and open source
+
+I built this to help people, not to make money from a difficult housing situation. The project is
+intended to be free and open source so that other people can inspect it, run it themselves, improve
+it, and adapt it to their own housing search.
+
+There are no subscriptions, referral commissions, affiliate links, paid listings, lead sales, or
+personal-data resale. No agency or landlord can pay to appear first. The goal is simply to make a
+stressful and unequal search a little more manageable.
+
+## How it works
 
 The project deliberately separates discovery, classification, notification, and outreach:
 
