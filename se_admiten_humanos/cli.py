@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from typing import Sequence
 
@@ -11,6 +12,7 @@ from .pet_policy import classify
 from .persistence import RentalStore
 from .profile_config import load_profile_bundle
 from .source_registry import default_registry
+from .telegram import TelegramBotClient, TelegramDeliveryError
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -35,6 +37,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--database",
         default="rentals.sqlite3",
         help="SQLite database path (default: rentals.sqlite3)",
+    )
+    subparsers.add_parser(
+        "test-telegram",
+        help="send a test alert using TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID",
     )
     return parser
 
@@ -74,5 +80,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"{len(bundle.renter_profiles)} renter profile(s), "
             f"{len(bundle.search_profiles)} search profile(s)."
         )
+        return 0
+    if args.command == "test-telegram":
+        token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+        chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+        if not token or not chat_id:
+            print(
+                "TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are required",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            message_id = TelegramBotClient(token).send_message(
+                chat_id,
+                "✅ Se admiten humanos puede enviarte alertas.",
+            )
+        except (ValueError, TelegramDeliveryError) as error:
+            print(f"Telegram test failed: {error}", file=sys.stderr)
+            return 1
+        print(f"Telegram test message sent (message id {message_id}).")
         return 0
     return 2

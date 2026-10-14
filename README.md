@@ -60,7 +60,9 @@ messages through unsupported portal APIs.
 - Machine-readable registry of portals, agencies, institutional landlords, and public housing sources.
 - Safe direct-email gate: draft by default, allow-listed agency email only for automatic sending.
 - Python regression tests plus source-registry validation.
-- Email ingestion, Telegram delivery, and live source adapters remain undeployed.
+- Tested Telegram delivery adapter with per-user destinations, atomic claims, retries, and an
+  actionable listing button; live credentials and deployment remain pending.
+- Email ingestion and live source adapters remain undeployed.
 
 ## Run locally
 
@@ -93,6 +95,24 @@ forms and encrypted production storage.
 Source adapters should pass normalized listings to `ListingPipeline.process()`. The pipeline returns
 profile-specific delivery candidates but does not claim or send them; a notification adapter must
 atomically call `claim_notification()` immediately before delivery.
+
+## Telegram delivery
+
+Telegram is the first alert channel. Create a bot with BotFather, send it `/start`, and keep its
+token outside Git. `TELEGRAM_USER_ID` is the application user id from the private profile bundle;
+`TELEGRAM_CHAT_ID` is that user's numeric Telegram chat id. The notifier requires an explicit
+user-to-chat mapping so alerts from one person's search cannot leak into another person's chat.
+
+Every alert labels the pet policy, shows the matching phrase (or clearly says it was not mentioned),
+and includes an **Abrir anuncio** button. A delivery is claimed immediately before the API call,
+marked `sent` only after Telegram confirms it, and marked `failed` on errors so a later run can retry.
+
+Once `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are present in the process environment, verify the
+connection without processing a listing:
+
+```powershell
+python -m se_admiten_humanos test-telegram
+```
 
 ## Source policy
 
