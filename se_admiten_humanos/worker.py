@@ -245,6 +245,9 @@ def _ensure_profiles(
 ) -> int:
     if store.load_enabled_search_profiles():
         return 0
+    if store.connection.execute("select 1 from accounts union all select 1 from bootstrap_blocks limit 1").fetchone():
+        # Registered users may not have configured searches yet, or deleted them.
+        return 0
     raw_bundle = environment.get("PROFILE_BUNDLE_JSON", "")
     if not raw_bundle.strip():
         raise WorkerConfigurationError(

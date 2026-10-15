@@ -20,6 +20,7 @@ from .monitoring import source_health_age_seconds
 from .persistence import RentalStore
 from .search_profile import SearchProfile
 from .telegram_linking import create_telegram_link
+from .accounts import Accounts, MailSettings
 
 
 StartResponse = Callable[[str, list[tuple[str, str]]], object]
@@ -38,6 +39,8 @@ class WebSettings:
     secure_cookies: bool = True
     session_days: int = 30
     status_page_token: str = ""
+    accounts_enabled: bool = False
+    mail: MailSettings | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +55,10 @@ class WebApplication:
 
     def __init__(self, settings: WebSettings) -> None:
         self.settings = settings
+        if settings.accounts_enabled:
+            if settings.mail is None:
+                raise ValueError("Verified accounts require SMTP configuration")
+            settings.mail.validate(settings.secure_cookies)
 
     def __call__(self, environ: Mapping[str, object], start_response: StartResponse):
         method = str(environ.get("REQUEST_METHOD", "GET")).upper()
@@ -61,6 +68,11 @@ class WebApplication:
         session_hash = _digest(session_token) if session_token else ""
         with RentalStore(self.settings.database_path) as store:
             user_id = store.web_session_user_id(session_hash) if session_hash else None
+            if self.settings.accounts_enabled:
+                from .account_web import handle_accounts
+                response = handle_accounts(self, store, environ, start_response, user_id, cookies)
+                if response is not None:
+                    return response
             if path == "/health" and method == "GET":
                 return self._respond(
                     start_response,
@@ -137,7 +149,7 @@ class WebApplication:
                 return self._respond(
                     start_response,
                     "200 OK",
-                    _profile_page(state, csrf),
+                    _profile_page(state, csrf, accounts_enabled=self.settings.accounts_enabled),
                     cookies=(() if cookies.get(_CSRF_COOKIE) else (self._csrf_cookie(csrf),)),
                 )
             if path == "/profile" and method == "POST":
@@ -153,7 +165,7 @@ class WebApplication:
                     return self._respond(
                         start_response,
                         "422 Unprocessable Entity",
-                        _profile_page(PageState(), csrf, str(error_value), form),
+                        _profile_page(self._load_state(store, user_id), csrf, str(error_value), form, accounts_enabled=self.settings.accounts_enabled),
                     )
                 response_cookies: list[str] = []
                 if user_id is None:
@@ -222,6 +234,9 @@ class WebApplication:
     ) -> PageState:
         display_name = _required(form, "display_name", "Tu nombre", 100)
         email = form.get("email", "").strip()
+        account = Accounts(store).account(existing_user_id)
+        if account and account[3]:
+            email = account[1]
         if email and (len(email) > 254 or not _EMAIL.fullmatch(email)):
             raise ValueError("Escribe un correo electrónico válido.")
         renter_name = _required(form, "renter_name", "Nombre de la persona inquilina", 100)
@@ -516,6 +531,8 @@ def _profile_page(
     csrf: str,
     error: str = "",
     submitted: Mapping[str, str] | None = None,
+    *,
+    accounts_enabled: bool = False,
 ) -> str:
     form = dict(submitted or {})
     user, renter, search = state.user, state.renter, state.search
@@ -563,7 +580,7 @@ def _profile_page(
     property_type_room = form.get("property_type_room", "") == "on"
     urgent = form.get("urgent", "") == "on"
     error_html = f'<div class="error" role="alert">{html.escape(error)}</div>' if error else ""
-    session_note = "Revisa tu búsqueda y cambia lo que necesites. Esta sesión está vinculada a este navegador." if user else "Define tus criterios. Al terminar podrás conectar Telegram para recibir avisos."
+    session_note = ("Revisa tu búsqueda y cambia lo que necesites." if accounts_enabled else "Revisa tu búsqueda y cambia lo que necesites. Esta sesión está vinculada a este navegador.") if user else "Define tus criterios. Al terminar podrás conectar Telegram para recibir avisos."
     body = f"""
     <header><a class="brand" href="/">Se admiten humanos</a><span class="badge">Gratis y open source</span></header>
     <main>
@@ -585,7 +602,7 @@ def _profile_page(
         </div><small class="option-note">Las sugerencias urgentes se etiquetan claramente y nunca superan tu máximo excepcional. Garajes y locales comerciales se excluyen siempre.</small></fieldset>
         <fieldset><legend>2 · Tú y tu situación</legend><div class="grid">
           <label>Tu nombre<input required maxlength="100" name="display_name" value="{_value(form, 'display_name')}"></label>
-          <label>Correo <small>Opcional; aún no enviamos emails.</small><input type="email" maxlength="254" name="email" value="{_value(form, 'email')}"></label>
+          {('<p>Gestiona tu correo verificado en <a href="/account">Mi cuenta</a>.</p>' if accounts_enabled else f'<label>Correo <small>Opcional; aún no enviamos emails.</small><input type="email" maxlength="254" name="email" value="{_value(form, "email")}"></label>')}
           <label>Nombre de la persona inquilina<input required maxlength="100" name="renter_name" value="{_value(form, 'renter_name')}"></label>
           <label>Nombre para contactar a la agencia<input required maxlength="100" name="sender_name" value="{_value(form, 'sender_name')}"></label>
           <label>Nómina mensual (€)<input type="number" min="1" max="100000" name="monthly_income_eur" value="{_value(form, 'monthly_income_eur')}"></label>
@@ -599,6 +616,7 @@ def _profile_page(
         </div></fieldset>
         <button class="primary" type="submit">Guardar y conectar Telegram →</button>
       </form>
+      {'<p><a href="/account">Mi cuenta · avisos, acceso y datos</a></p>' if accounts_enabled else ''}
       {f'<form method="post" action="/logout" class="logout"><input type="hidden" name="csrf_token" value="{html.escape(csrf, quote=True)}"><button type="submit">Cerrar sesión en este navegador</button></form>' if user else ''}
       </section>
       <section class="how"><p class="eyebrow">Cómo funciona</p><h2>Rápido, pero honesto.</h2><div class="cards"><article><b>01</b><h3>Buscamos</h3><p>Consultamos fuentes autorizadas y webs de agencias con controles para detectar cambios.</p></article><article><b>02</b><h3>Filtramos</h3><p>Aplicamos presupuesto, zona, tipo de alquiler y demás preferencias sin inventar información que el anuncio no da.</p></article><article><b>03</b><h3>Te avisamos</h3><p>Recibes el anuncio y la evidencia en Telegram para abrirlo y responder en dos toques.</p></article></div></section>

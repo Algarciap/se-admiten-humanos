@@ -58,11 +58,14 @@ move-in needs, employment details, and animals. The form writes a user-owned ren
 profile directly to the same SQLite database used by matching, then creates a ten-minute Telegram
 connection link.
 
-The first MVP uses an opaque, browser-bound session cookie: only its SHA-256 digest is stored, it is
-`HttpOnly`, `Secure`, and `SameSite=Lax`, and state-changing forms require a separate CSRF token.
-Returning with the same browser allows the person to edit their profile. There is deliberately no
-pretence of a finished account system yet: email is not verified, and account recovery across devices
-is the next identity milestone.
+Sessions use opaque cookies whose SHA-256 digests alone are stored; cookies are `HttpOnly`,
+`Secure`, and `SameSite=Lax`, and state-changing forms require a separate CSRF token.
+Optional verified account mode adds email verification, password login across devices, password
+recovery, logout on all devices, data export/deletion, alert pause and Telegram disconnection.
+Set up transactional SMTP before enabling `ACCOUNTS_ENABLED=true`; missing mail configuration
+fails startup. The default remains the browser-bound invited pilot until email delivery is ready.
+Existing users can attach their current browser's search to a verified account without losing
+profiles or notification history. See [account setup and rollout](docs/accounts.md).
 
 For a local HTTP preview only:
 
@@ -221,8 +224,8 @@ python -m se_admiten_humanos create-telegram-link --user-id USER_ID
 ```
 
 The command reads `TELEGRAM_BOT_USERNAME` (or accepts `--bot-username`) and prints the deep link once.
-This is the service layer the future website form will call; the public form and authentication UI are
-the next milestone, not part of this background worker.
+The website calls this service layer for Telegram connection; account-mode users can also
+disconnect Telegram or pause notifications from **Mi cuenta**.
 
 Every alert labels the pet policy, shows the matching phrase (or clearly says it was not mentioned),
 distinguishes an ordinary match from an urgent over-budget suggestion, and includes an **Abrir

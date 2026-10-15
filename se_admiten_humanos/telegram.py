@@ -220,9 +220,12 @@ def notifier_from_environment(
     if bool(user_id) != bool(chat_id):
         missing = "TELEGRAM_CHAT_ID" if user_id else "TELEGRAM_USER_ID"
         raise ValueError(f"Missing Telegram configuration: {missing}")
-    if user_id and chat_id and not store.telegram_destination_configured(user_id):
+    from .accounts import digest
+    blocked = store.connection.execute("select 1 from bootstrap_blocks where user_hash = ?", (digest(user_id),)).fetchone()
+    if user_id and chat_id and not blocked and not store.telegram_destination_configured(user_id):
         store.save_telegram_destination(user_id, chat_id)
 
-    if not store.load_telegram_destinations():
+    if (not store.load_telegram_destinations()
+            and not store.connection.execute("select 1 from accounts union all select 1 from bootstrap_blocks limit 1").fetchone()):
         raise ValueError("At least one enabled Telegram destination is required")
     return TelegramNotifier(store, TelegramBotClient(token))

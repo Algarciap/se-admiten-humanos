@@ -16,7 +16,7 @@ from .models import Listing, Pet, PetDecision, PropertyType, RentalDuration, Ren
 from .search_profile import SearchDecision, SearchProfile
 
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 _TELEGRAM_CHAT_ID = re.compile(r"-?[1-9][0-9]*")
 
@@ -234,6 +234,34 @@ class RentalStore:
         if version == 10:
             self._migrate_v10_to_v11()
             version = 11
+        if version == 11:
+            self.connection.executescript("""
+                begin immediate;
+                create table if not exists accounts (
+                    user_id text primary key references users(id) on delete cascade,
+                    email text not null unique,
+                    password_hash text not null,
+                    verified integer not null default 0,
+                    alerts_paused integer not null default 0
+                );
+                create table if not exists account_tokens (
+                    token_hash text primary key,
+                    user_id text not null references accounts(user_id) on delete cascade,
+                    purpose text not null check (purpose in ('verify', 'reset')),
+                    expires_at text not null
+                );
+                create table if not exists auth_limits (
+                    key_hash text primary key,
+                    window_start integer not null,
+                    attempts integer not null
+                );
+                create table if not exists bootstrap_blocks (
+                    user_hash text primary key
+                );
+                pragma user_version = 12;
+                commit;
+            """)
+            version = 12
         if version != SCHEMA_VERSION:
             raise RuntimeError(
                 f"Unsupported database schema version {version}; expected {SCHEMA_VERSION}"
@@ -1143,6 +1171,10 @@ class RentalStore:
     def telegram_chat_id(self, user_id: str) -> str | None:
         """Return one enabled destination without exposing other users' chats."""
 
+        if self.connection.execute(
+            "select 1 from accounts where user_id = ? and alerts_paused = 1", (user_id,)
+        ).fetchone():
+            return None
         row = self.connection.execute(
             """
             select chat_id

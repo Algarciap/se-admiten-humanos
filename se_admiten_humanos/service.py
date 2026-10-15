@@ -7,8 +7,10 @@ import threading
 from collections.abc import Mapping
 from socketserver import ThreadingMixIn
 from wsgiref.simple_server import WSGIRequestHandler, WSGIServer, make_server
+from urllib.parse import urlsplit
 
 from .web import WebApplication, WebSettings
+from .accounts import MailSettings
 from .worker import WorkerSettings, run_worker
 
 
@@ -17,6 +19,11 @@ class ThreadingWSGIServer(ThreadingMixIn, WSGIServer):
 
 
 class QuietRequestHandler(WSGIRequestHandler):
+    def log_request(self, code="-", size="-") -> None:
+        # Email capabilities are carried in URLs; never put query strings in logs.
+        if urlsplit(self.path).path != "/health":
+            self.log_message('"%s %s" %s %s', self.command, urlsplit(self.path).path, code, size)
+
     def log_message(self, format: str, *args: object) -> None:
         if self.path != "/health":
             super().log_message(format, *args)
@@ -41,12 +48,36 @@ def web_settings_from_environment(
     status_page_token = values.get("STATUS_PAGE_TOKEN", "").strip()
     if status_page_token and len(status_page_token) < 24:
         raise ValueError("STATUS_PAGE_TOKEN must contain at least 24 characters")
+    accounts_value = values.get("ACCOUNTS_ENABLED", "false").strip().casefold()
+    if accounts_value not in {"true", "false"}:
+        raise ValueError("ACCOUNTS_ENABLED must be true or false")
+    mail = None
+    if accounts_value == "true":
+        tls_value = values.get("SMTP_IMPLICIT_TLS", "false").strip().casefold()
+        if tls_value not in {"true", "false"}:
+            raise ValueError("SMTP_IMPLICIT_TLS must be true or false")
+        try:
+            smtp_port = int(values.get("SMTP_PORT", "587"))
+        except ValueError:
+            raise ValueError("SMTP_PORT must be a whole number") from None
+        mail = MailSettings(
+            public_url=values.get("PUBLIC_BASE_URL", "").strip(),
+            host=values.get("SMTP_HOST", "").strip(),
+            sender=values.get("SMTP_FROM", "").strip(),
+            port=smtp_port,
+            username=values.get("SMTP_USERNAME", ""),
+            password=values.get("SMTP_PASSWORD", ""),
+            implicit_tls=tls_value == "true",
+        )
+        mail.validate(secure_value == "true")
     return (
         WebSettings(
             database_path=values.get("DATABASE_PATH", "rentals.sqlite3").strip(),
             bot_username=bot_username,
             secure_cookies=secure_value == "true",
             status_page_token=status_page_token,
+            accounts_enabled=accounts_value == "true",
+            mail=mail,
         ),
         port,
     )

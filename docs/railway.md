@@ -99,9 +99,11 @@ health, inventory totals, failure counts, and sanitized technical errors only. I
 excludes users, Telegram chat ids, and search criteria. Without the variable, the route returns `404`
 rather than exposing an unprotected dashboard.
 
-The onboarding session is currently tied to one browser. Email verification, cross-device sign-in,
-account recovery, abuse controls, and administrative deletion tools are required before broad public
-promotion; this release is suitable for a small invited pilot.
+The default onboarding mode remains a browser-bound invited pilot. Verified account mode adds
+cross-device login, recovery, personal export/deletion, and alert controls, but requires configured
+transactional SMTP. Follow [the account rollout procedure](accounts.md) before setting
+`ACCOUNTS_ENABLED=true`. Validate email delivery, migrations, upstream query-string logging and
+abuse controls before broader promotion. Keep one replica while SQLite is used.
 
 On the next cycle, the worker constructs the Telegram notifier and performs a normal live check.
 That cycle also migrates the first user's legacy environment mapping into the database.

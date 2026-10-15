@@ -371,7 +371,7 @@ class PersistenceTests(unittest.TestCase):
                 "select count(*) from legacy_notifications_v1"
             ).fetchone()[0]
 
-            self.assertEqual(version, 11)
+            self.assertEqual(version, 12)
         self.assertEqual(listing_count, 1)
         self.assertEqual(legacy_count, 1)
 
