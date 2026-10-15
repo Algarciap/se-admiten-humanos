@@ -772,7 +772,7 @@ def _status_page(records, csrf: str) -> str:
 
 
 def _layout(title: str, body: str) -> str:
-    return f"""<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{html.escape(title)}</title><meta name="description" content="Alertas gratuitas y open source para encontrar alquiler antes y con menos ruido."><style>{_CSS}</style></head><body>{body}<footer><p>Hecho para ayudar, no para ganar dinero. <a href="https://github.com/Algarciap/se-admiten-humanos">Código libre y abierto</a>.</p><p>Tus preferencias mandan; no inventamos información que el anuncio no da.</p></footer></body></html>"""
+    return f"""<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{html.escape(title)}</title><meta name="description" content="Alertas gratuitas y open source para encontrar alquiler antes y con menos ruido."><style>{_CSS}</style></head><body>{body}<footer><p>Hecho para ayudar, no para ganar dinero. <a href="https://github.com/Algarciap/se-admiten-humanos" target="_blank" rel="noopener noreferrer">Ver código en GitHub ↗</a>.</p><p>Tus preferencias mandan; no inventamos información que el anuncio no da.</p></footer></body></html>"""
 
 
 _FORM_JS = """
