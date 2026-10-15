@@ -176,6 +176,10 @@ class WebTests(unittest.TestCase):
         self.assertIn("Presupuesto preferido al mes (€)", page)
         self.assertNotIn("Presupuesto preferido al mes <span>€</span>", page)
         self.assertIn("fieldset{padding:0 0 22px}", page)
+        self.assertIn(
+            ".cards{border-top:2px solid var(--ink);padding-top:20px}", page
+        )
+        self.assertIn(".cards article{border-top:0;padding-top:0}", page)
 
     def test_first_visit_has_no_search_assumptions(self):
         status, _, page = self.request()
