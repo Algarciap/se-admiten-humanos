@@ -9,7 +9,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from .models import Pet, RenterProfile, User
+from .models import Pet, RentalDuration, RenterProfile, User
 from .search_profile import SearchProfile
 
 
@@ -100,6 +100,14 @@ def _renter_profile(payload: Any) -> RenterProfile:
 def _search_profile(payload: Any) -> SearchProfile:
     values = _mapping(payload, "search profile")
     move_in_by_value = values.get("move_in_by")
+    duration_values = _items(
+        values.get("accepted_rental_durations", ["long_term"]),
+        "accepted_rental_durations",
+    )
+    try:
+        accepted_durations = tuple(RentalDuration(str(item)) for item in duration_values)
+    except ValueError as error:
+        raise ValueError("accepted_rental_durations contains an unknown value") from error
     return SearchProfile(
         id=str(values["id"]),
         user_id=str(values["user_id"]),
@@ -130,6 +138,7 @@ def _search_profile(payload: Any) -> SearchProfile:
         move_in_by=(
             date.fromisoformat(str(move_in_by_value)) if move_in_by_value else None
         ),
+        accepted_rental_durations=accepted_durations,
         requires_pet_acceptance=_boolean(
             values,
             "requires_pet_acceptance",

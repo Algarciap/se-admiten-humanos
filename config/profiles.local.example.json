@@ -40,6 +40,7 @@
       "furnished": null,
       "move_in_asap": true,
       "move_in_by": null,
+      "accepted_rental_durations": ["long_term"],
       "requires_pet_acceptance": true,
       "enabled": true
     }

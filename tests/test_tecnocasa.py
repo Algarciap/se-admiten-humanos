@@ -5,7 +5,7 @@ import html
 import json
 import unittest
 
-from se_admiten_humanos.models import WebsiteDiscovery
+from se_admiten_humanos.models import RentalDuration, WebsiteDiscovery
 from se_admiten_humanos.tecnocasa import (
     SITEMAP_URLS,
     TecnocasaSource,
@@ -67,6 +67,7 @@ class TecnocasaTests(unittest.TestCase):
         self.assertEqual(listing.district, "Cuatro Caminos")
         self.assertTrue(listing.is_furnished)
         self.assertIn("No se admiten animales", listing.description)
+        self.assertIs(listing.rental_duration, RentalDuration.LONG_TERM)
 
     def test_source_reads_both_compressed_sitemaps_and_exact_detail(self) -> None:
         requests: list[str] = []

@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from se_admiten_humanos.models import Listing, Pet, RenterProfile, User
+from se_admiten_humanos.models import Listing, Pet, RentalDuration, RenterProfile, User
 from se_admiten_humanos.persistence import RentalStore, canonicalize_url
 from se_admiten_humanos.pet_policy import classify
 from se_admiten_humanos.search_profile import SearchProfile, evaluate_listing
@@ -255,6 +255,10 @@ class PersistenceTests(unittest.TestCase):
             allow_unknown_bedrooms=False,
             furnished=True,
             move_in_asap=False,
+            accepted_rental_durations=(
+                RentalDuration.LONG_TERM,
+                RentalDuration.TEMPORARY,
+            ),
             requires_pet_acceptance=True,
         )
 
@@ -365,7 +369,7 @@ class PersistenceTests(unittest.TestCase):
                 "select count(*) from legacy_notifications_v1"
             ).fetchone()[0]
 
-        self.assertEqual(version, 7)
+        self.assertEqual(version, 8)
         self.assertEqual(listing_count, 1)
         self.assertEqual(legacy_count, 1)
 

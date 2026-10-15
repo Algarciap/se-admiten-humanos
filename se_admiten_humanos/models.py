@@ -16,6 +16,14 @@ class PetStatus(str, Enum):
     REJECTED = "rejected"
 
 
+class RentalDuration(str, Enum):
+    """Advertised type of residential tenancy."""
+
+    LONG_TERM = "long_term"
+    TEMPORARY = "temporary"
+    NOT_SPECIFIED = "not_specified"
+
+
 @dataclass(frozen=True, slots=True)
 class PetDecision:
     """Explainable result of evaluating a listing's pet policy."""
@@ -43,6 +51,8 @@ class Listing:
     area_sqm: int | None = None
     is_furnished: bool | None = None
     available_from: date | None = None
+    rental_duration: RentalDuration = RentalDuration.NOT_SPECIFIED
+    rental_duration_evidence: str = ""
     description: str = ""
     url: str = ""
     contact_name: str = ""

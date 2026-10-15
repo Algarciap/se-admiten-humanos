@@ -6,7 +6,7 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import date
 
-from .models import Listing, PetDecision, PetStatus
+from .models import Listing, PetDecision, PetStatus, RentalDuration
 
 
 def _normalize_place(value: str) -> str:
@@ -34,6 +34,7 @@ class SearchProfile:
     furnished: bool | None = None
     move_in_asap: bool = True
     move_in_by: date | None = None
+    accepted_rental_durations: tuple[RentalDuration, ...] = (RentalDuration.LONG_TERM,)
     requires_pet_acceptance: bool = False
     enabled: bool = True
 
@@ -51,6 +52,10 @@ class SearchProfile:
             raise ValueError("Maximum rent must be greater than zero")
         if self.preferred_min_bedrooms < 0:
             raise ValueError("Preferred bedroom count cannot be negative")
+        if not self.accepted_rental_durations:
+            raise ValueError("At least one rental duration must be accepted")
+        if len(self.accepted_rental_durations) != len(set(self.accepted_rental_durations)):
+            raise ValueError("Accepted rental durations must be unique")
         normalized_districts = [
             _normalize_place(value) for value in self.acceptable_districts
         ]
@@ -139,6 +144,11 @@ def evaluate_listing(
         and listing.available_from > profile.move_in_by
     ):
         rejections.append("available_too_late")
+
+    if listing.rental_duration is RentalDuration.NOT_SPECIFIED:
+        notes.append("rental_duration_not_disclosed")
+    elif listing.rental_duration not in profile.accepted_rental_durations:
+        rejections.append("rental_duration_mismatch")
 
     return SearchDecision(
         eligible=not rejections,

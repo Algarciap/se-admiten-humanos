@@ -11,7 +11,8 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 from xml.etree import ElementTree
 
-from .models import Listing, WebsiteDiscovery
+from .models import Listing, RentalDuration, WebsiteDiscovery
+from .rental_duration import classify_rental_duration
 
 
 SOURCE_ID = "alquiler_seguro"
@@ -147,6 +148,9 @@ def parse_listing(html_text: str, discovery: WebsiteDiscovery) -> Listing:
         raise ValueError("Alquiler Seguro detail municipality could not be parsed")
 
     normalized_description = description.casefold()
+    rental_duration, duration_evidence = classify_rental_duration(
+        f"{title} {description}", category_default=RentalDuration.LONG_TERM
+    )
     furnished: bool | None = None
     if "sin amueblar" in normalized_description:
         furnished = False
@@ -166,6 +170,8 @@ def parse_listing(html_text: str, discovery: WebsiteDiscovery) -> Listing:
         area_sqm=int(area_match.group("area")) if area_match else None,
         is_furnished=furnished,
         description=description,
+        rental_duration=rental_duration,
+        rental_duration_evidence=duration_evidence,
         url=discovery.url,
         contact_name="Alquiler Seguro",
     )

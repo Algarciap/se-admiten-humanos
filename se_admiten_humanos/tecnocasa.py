@@ -14,7 +14,8 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 from xml.etree import ElementTree
 
-from .models import Listing, WebsiteDiscovery
+from .models import Listing, RentalDuration, WebsiteDiscovery
+from .rental_duration import classify_rental_duration
 
 
 SOURCE_ID = "tecnocasa"
@@ -154,6 +155,9 @@ def parse_listing(html_text: str, discovery: WebsiteDiscovery) -> Listing:
     except ValueError:
         area_sqm = None
     normalized = description.casefold()
+    rental_duration, duration_evidence = classify_rental_duration(
+        f"{title} {description}", category_default=RentalDuration.LONG_TERM
+    )
     furnished: bool | None = None
     if "sin amueblar" in normalized:
         furnished = False
@@ -173,6 +177,8 @@ def parse_listing(html_text: str, discovery: WebsiteDiscovery) -> Listing:
         area_sqm=area_sqm,
         is_furnished=furnished,
         description=description,
+        rental_duration=rental_duration,
+        rental_duration_evidence=duration_evidence,
         url=discovery.url,
         contact_name=contact_name or "Tecnocasa",
         contact_email=contact_email,

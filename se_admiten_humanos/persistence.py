@@ -12,11 +12,11 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from .models import Listing, Pet, PetDecision, RenterProfile, User, WebsiteDiscovery
+from .models import Listing, Pet, PetDecision, RentalDuration, RenterProfile, User, WebsiteDiscovery
 from .search_profile import SearchDecision, SearchProfile
 
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 _TELEGRAM_CHAT_ID = re.compile(r"-?[1-9][0-9]*")
 
@@ -192,6 +192,7 @@ class RentalStore:
             self._migrate_v4_to_v5()
             self._migrate_v5_to_v6()
             self._migrate_v6_to_v7()
+            self._migrate_v7_to_v8()
         elif version == 1:
             self._migrate_v1_to_v2()
             self._migrate_v2_to_v3()
@@ -199,26 +200,34 @@ class RentalStore:
             self._migrate_v4_to_v5()
             self._migrate_v5_to_v6()
             self._migrate_v6_to_v7()
+            self._migrate_v7_to_v8()
         elif version == 2:
             self._migrate_v2_to_v3()
             self._migrate_v3_to_v4()
             self._migrate_v4_to_v5()
             self._migrate_v5_to_v6()
             self._migrate_v6_to_v7()
+            self._migrate_v7_to_v8()
         elif version == 3:
             self._migrate_v3_to_v4()
             self._migrate_v4_to_v5()
             self._migrate_v5_to_v6()
             self._migrate_v6_to_v7()
+            self._migrate_v7_to_v8()
         elif version == 4:
             self._migrate_v4_to_v5()
             self._migrate_v5_to_v6()
             self._migrate_v6_to_v7()
+            self._migrate_v7_to_v8()
         elif version == 5:
             self._migrate_v5_to_v6()
             self._migrate_v6_to_v7()
+            self._migrate_v7_to_v8()
         elif version == 6:
             self._migrate_v6_to_v7()
+            self._migrate_v7_to_v8()
+        elif version == 7:
+            self._migrate_v7_to_v8()
         elif version != SCHEMA_VERSION:
             raise RuntimeError(
                 f"Unsupported database schema version {version}; expected {SCHEMA_VERSION}"
@@ -461,6 +470,17 @@ class RentalStore:
                 on web_sessions(user_id, expires_at);
 
             pragma user_version = 7;
+            """
+        )
+        self.connection.commit()
+
+    def _migrate_v7_to_v8(self) -> None:
+        self.connection.executescript(
+            """
+            alter table search_profiles add column accepted_rental_durations_json
+                text not null default '["long_term"]';
+
+            pragma user_version = 8;
             """
         )
         self.connection.commit()
@@ -1175,8 +1195,9 @@ class RentalStore:
                     municipality, acceptable_districts_json,
                     preferred_min_bedrooms, allow_studios,
                     allow_unknown_bedrooms, furnished, move_in_asap, move_in_by,
-                    requires_pet_acceptance, enabled, created_at, updated_at
-                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    accepted_rental_durations_json, requires_pet_acceptance,
+                    enabled, created_at, updated_at
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict(id) do update set
                     user_id = excluded.user_id,
                     renter_profile_id = excluded.renter_profile_id,
@@ -1190,6 +1211,7 @@ class RentalStore:
                     furnished = excluded.furnished,
                     move_in_asap = excluded.move_in_asap,
                     move_in_by = excluded.move_in_by,
+                    accepted_rental_durations_json = excluded.accepted_rental_durations_json,
                     requires_pet_acceptance = excluded.requires_pet_acceptance,
                     enabled = excluded.enabled,
                     updated_at = excluded.updated_at
@@ -1208,6 +1230,7 @@ class RentalStore:
                     furnished,
                     int(profile.move_in_asap),
                     move_in_by,
+                    json.dumps([value.value for value in profile.accepted_rental_durations]),
                     int(profile.requires_pet_acceptance),
                     int(profile.enabled),
                     now,
@@ -1225,7 +1248,7 @@ class RentalStore:
                 renter_profile_id, acceptable_districts_json,
                 preferred_min_bedrooms, allow_studios,
                 allow_unknown_bedrooms, furnished, move_in_asap, move_in_by,
-                requires_pet_acceptance, enabled
+                accepted_rental_durations_json, requires_pet_acceptance, enabled
             from search_profiles
             where id = ?
             """,
@@ -1245,7 +1268,7 @@ class RentalStore:
                 renter_profile_id, acceptable_districts_json,
                 preferred_min_bedrooms, allow_studios,
                 allow_unknown_bedrooms, furnished, move_in_asap, move_in_by,
-                requires_pet_acceptance, enabled
+                accepted_rental_durations_json, requires_pet_acceptance, enabled
             from search_profiles
             where user_id = ?
             order by created_at, id
@@ -1265,7 +1288,7 @@ class RentalStore:
                 renter_profile_id, acceptable_districts_json,
                 preferred_min_bedrooms, allow_studios,
                 allow_unknown_bedrooms, furnished, move_in_asap, move_in_by,
-                requires_pet_acceptance, enabled
+                accepted_rental_durations_json, requires_pet_acceptance, enabled
             from search_profiles
             where enabled = 1
             order by id
@@ -1291,8 +1314,11 @@ class RentalStore:
             furnished=furnished,
             move_in_asap=bool(row[11]),
             move_in_by=move_in_by,
-            requires_pet_acceptance=bool(row[13]),
-            enabled=bool(row[14]),
+            accepted_rental_durations=tuple(
+                RentalDuration(value) for value in json.loads(str(row[13]))
+            ),
+            requires_pet_acceptance=bool(row[14]),
+            enabled=bool(row[15]),
         )
 
     def upsert(self, listing: Listing) -> UpsertResult:

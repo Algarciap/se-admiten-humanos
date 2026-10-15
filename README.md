@@ -1,6 +1,6 @@
 # Se admiten humanos
 
-A free and open-source project for helping people find long-term rentals where every member of the
+A free and open-source project for helping people find long-term or temporary rentals where every member of the
 household—including pets—is welcome.
 
 ## Why this exists
@@ -52,6 +52,7 @@ The project deliberately separates discovery, classification, notification, and 
 
 The Railway service now hosts a Spanish onboarding page as well as the background watcher. A person
 can enter their own rent ceiling, Madrid districts, bedroom flexibility, furnishing preference,
+rental duration (long-term, temporary, or both),
 move-in needs, employment details, and animals. The form writes a user-owned renter and search
 profile directly to the same SQLite database used by matching, then creates a ten-minute Telegram
 connection link.

@@ -69,6 +69,7 @@ class WebTests(unittest.TestCase):
             "move_in_asap": "on",
             "acceptable_districts": "Centro, Chamberí",
             "furnished": "any",
+            "rental_duration": "both",
             "monthly_income_eur": "2500",
             "job": "Técnica de sonido",
             "contract_type": "Indefinido",
@@ -98,6 +99,7 @@ class WebTests(unittest.TestCase):
             self.assertEqual(profiles[0].max_rent_eur, 1100)
             self.assertEqual(profiles[0].acceptable_districts, ("Centro", "Chamberí"))
             self.assertTrue(profiles[0].requires_pet_acceptance)
+            self.assertEqual(len(profiles[0].accepted_rental_durations), 2)
             token_count = store.connection.execute(
                 "select count(*) from telegram_link_tokens"
             ).fetchone()[0]

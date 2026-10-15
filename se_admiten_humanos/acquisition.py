@@ -8,7 +8,7 @@ from datetime import date
 from pathlib import Path
 from typing import Iterable, Mapping, Protocol
 
-from .models import Listing
+from .models import Listing, RentalDuration
 from .persistence import RentalStore, SourceRunRecord
 from .pipeline import ListingPipeline, ProcessingResult
 from .telegram import DeliveryAttempt
@@ -105,6 +105,14 @@ class JsonFileAdapter:
                 except ValueError as error:
                     raise ValueError(
                         f"Listing {index} available_from must be an ISO date"
+                    ) from error
+            rental_duration = values.get("rental_duration")
+            if rental_duration is not None:
+                try:
+                    values["rental_duration"] = RentalDuration(str(rental_duration))
+                except ValueError as error:
+                    raise ValueError(
+                        f"Listing {index} rental_duration is invalid"
                     ) from error
             try:
                 yield Listing(**values)

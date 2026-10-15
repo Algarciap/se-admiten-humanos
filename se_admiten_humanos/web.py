@@ -14,7 +14,7 @@ from typing import Callable, Iterable, Mapping
 from urllib.parse import parse_qs
 from uuid import uuid4
 
-from .models import Pet, RenterProfile, User
+from .models import Pet, RentalDuration, RenterProfile, User
 from .persistence import RentalStore
 from .search_profile import SearchProfile
 from .telegram_linking import create_telegram_link
@@ -170,6 +170,14 @@ class WebApplication:
         if furnished_value not in {"any", "yes", "no"}:
             raise ValueError("La preferencia de mobiliario no es válida.")
         furnished = None if furnished_value == "any" else furnished_value == "yes"
+        duration_value = form.get("rental_duration", "long_term")
+        duration_options = {
+            "long_term": (RentalDuration.LONG_TERM,),
+            "temporary": (RentalDuration.TEMPORARY,),
+            "both": (RentalDuration.LONG_TERM, RentalDuration.TEMPORARY),
+        }
+        if duration_value not in duration_options:
+            raise ValueError("El tipo de alquiler no es válido.")
         move_in_value = form.get("move_in_by", "").strip()
         try:
             move_in_by = date.fromisoformat(move_in_value) if move_in_value else None
@@ -218,6 +226,7 @@ class WebApplication:
             furnished=furnished,
             move_in_asap="move_in_asap" in form,
             move_in_by=move_in_by,
+            accepted_rental_durations=duration_options[duration_value],
             requires_pet_acceptance=pet_count > 0,
         )
         store.save_user(user)
@@ -398,12 +407,18 @@ def _profile_page(
                 "allow_studios": "on" if search.allow_studios else "",
                 "allow_unknown_bedrooms": "on" if search.allow_unknown_bedrooms else "",
                 "move_in_asap": "on" if search.move_in_asap else "",
+                "rental_duration": (
+                    "both"
+                    if len(search.accepted_rental_durations) == 2
+                    else search.accepted_rental_durations[0].value
+                ),
             })
     is_new = user is None
     studios = form.get("allow_studios", "on" if is_new else "") == "on"
     unknown = form.get("allow_unknown_bedrooms", "on" if is_new else "") == "on"
     asap = form.get("move_in_asap", "on" if is_new else "") == "on"
     furnished = form.get("furnished", "any")
+    rental_duration = form.get("rental_duration", "long_term")
     error_html = f'<div class="error" role="alert">{html.escape(error)}</div>' if error else ""
     session_note = "Tus datos se guardan en este navegador y puedes volver para cambiarlos." if user else "No necesitas instalar nada. Al terminar conectarás tu Telegram."
     body = f"""
@@ -417,6 +432,7 @@ def _profile_page(
           <label>Dormitorios preferidos<input required type="number" min="0" max="10" name="preferred_min_bedrooms" value="{_value(form, 'preferred_min_bedrooms', 1)}"></label>
           <label class="wide">Distritos aceptables <small>Déjalo vacío para todo Madrid; separa varios con comas.</small><input name="acceptable_districts" value="{_value(form, 'acceptable_districts')}" placeholder="Centro, Chamberí, Retiro…"></label>
           <label>Mobiliario<select name="furnished"><option value="any"{' selected' if furnished == 'any' else ''}>Me da igual</option><option value="yes"{' selected' if furnished == 'yes' else ''}>Amueblado</option><option value="no"{' selected' if furnished == 'no' else ''}>Sin amueblar</option></select></label>
+          <label>Tipo de alquiler<select name="rental_duration"><option value="long_term"{' selected' if rental_duration == 'long_term' else ''}>Larga duración</option><option value="temporary"{' selected' if rental_duration == 'temporary' else ''}>Temporal / por temporada</option><option value="both"{' selected' if rental_duration == 'both' else ''}>Ambos</option></select></label>
           <label>Fecha límite de entrada <small>Opcional</small><input type="date" name="move_in_by" value="{_value(form, 'move_in_by')}"></label>
         </div><div class="checks"><label><input type="checkbox" name="allow_studios"{_checked(studios)}> Incluir estudios</label><label><input type="checkbox" name="allow_unknown_bedrooms"{_checked(unknown)}> Incluir anuncios que no indican dormitorios</label><label><input type="checkbox" name="move_in_asap"{_checked(asap)}> Necesito entrar cuanto antes</label></div></fieldset>
         <fieldset><legend>2 · Tú y tu situación</legend><div class="grid">

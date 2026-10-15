@@ -4,7 +4,7 @@ import html
 import json
 import unittest
 
-from se_admiten_humanos.models import WebsiteDiscovery
+from se_admiten_humanos.models import RentalDuration, WebsiteDiscovery
 from se_admiten_humanos.redpiso import SITEMAP_URL, RedpisoSource, parse_listing, parse_sitemap
 
 
@@ -14,6 +14,7 @@ SITEMAP = f"""<?xml version="1.0" encoding="UTF-8"?>
   <url><loc>{URL}</loc><lastmod>2026-10-15T10:00:00Z</lastmod></url>
   <url><loc>https://www.redpiso.es/inmueble/piso-vacacional-en-alquiler-en-madrid-RP1</loc></url>
   <url><loc>https://www.redpiso.es/inmueble/piso-en-venta-en-madrid-RP2</loc></url>
+  <url><loc>https://www.redpiso.es/inmueble/piso-alquiler-temporal-centro-madrid-RP3</loc></url>
 </urlset>"""
 
 SCHEMA = {
@@ -45,7 +46,7 @@ class RedpisoTests(unittest.TestCase):
     def test_sitemap_keeps_only_long_term_madrid_rentals(self) -> None:
         discoveries = parse_sitemap(SITEMAP)
 
-        self.assertEqual(len(discoveries), 1)
+        self.assertEqual(len(discoveries), 2)
         self.assertEqual(discoveries[0].external_id, "RP1332026157718")
         self.assertEqual(discoveries[0].source_last_modified, "2026-10-15T10:00:00Z")
 
@@ -65,6 +66,7 @@ class RedpisoTests(unittest.TestCase):
         self.assertTrue(listing.is_furnished)
         self.assertEqual(listing.contact_email, "centro@redpiso.es")
         self.assertIn("Se aceptan mascotas", listing.description)
+        self.assertIs(listing.rental_duration, RentalDuration.LONG_TERM)
 
     def test_source_fetches_public_sitemap_then_exact_detail(self) -> None:
         requests: list[str] = []

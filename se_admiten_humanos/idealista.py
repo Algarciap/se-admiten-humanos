@@ -11,7 +11,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 
-from .models import Listing
+from .models import Listing, RentalDuration
+from .rental_duration import classify_rental_duration
 
 
 AUTH_URL = "https://api.idealista.com/oauth/token"
@@ -273,6 +274,10 @@ def _normalize_listing(
         else f"Vivienda en {district or municipality}"
     )
     furnished = element.get("furnished")
+    description = _optional_text(element, "description")
+    rental_duration, duration_evidence = classify_rental_duration(
+        f"{title} {description}", category_default=RentalDuration.LONG_TERM
+    )
     return Listing(
         source_id="idealista",
         external_id=external_id,
@@ -290,6 +295,8 @@ def _normalize_listing(
         bedrooms=rooms,
         area_sqm=area,
         is_furnished=furnished if isinstance(furnished, bool) else None,
-        description=_optional_text(element, "description"),
+        description=description,
+        rental_duration=rental_duration,
+        rental_duration_evidence=duration_evidence,
         url=url,
     )

@@ -268,7 +268,7 @@
     "pet_signal": "description_or_agent_confirmation",
     "direct_contact": "email_whatsapp_or_phone",
     "evidence_url": "https://www.redpiso.es/alquiler-viviendas/madrid/madrid",
-    "notes": "The live adapter reads the published property sitemap, keeps long-term Madrid-region residential rentals, and fetches only unseen detail pages. User profiles filter Madrid city; contact stays manual by default.",
+    "notes": "The live adapter reads the published property sitemap, keeps long-term and temporary Madrid-region residential rentals, and fetches only unseen detail pages. User profiles filter duration, Madrid city, and budget; contact stays manual by default.",
     "verified_on": "2026-10-15"
   },
   {

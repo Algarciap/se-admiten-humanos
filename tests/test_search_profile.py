@@ -2,7 +2,7 @@
 
 import unittest
 
-from se_admiten_humanos.models import Listing
+from se_admiten_humanos.models import Listing, RentalDuration
 from se_admiten_humanos.pet_policy import classify
 from se_admiten_humanos.search_profile import SearchProfile, evaluate_listing
 
@@ -144,6 +144,39 @@ class SearchProfileTests(unittest.TestCase):
 
         self.assertTrue(accepted.eligible)
         self.assertIn("outside_selected_districts", rejected.rejection_reasons)
+
+    def test_rental_duration_is_profile_specific(self) -> None:
+        temporary = Listing(
+            price_eur=900,
+            municipality="Madrid",
+            bedrooms=1,
+            rental_duration=RentalDuration.TEMPORARY,
+        )
+        long_term_decision = evaluate_listing(temporary, classify(""), self.profile)
+        temporary_profile = SearchProfile(
+            id="temporary",
+            user_id="user-temporary",
+            name="Madrid temporal",
+            max_rent_eur=950,
+            municipality="Madrid",
+            accepted_rental_durations=(RentalDuration.TEMPORARY,),
+        )
+
+        temporary_decision = evaluate_listing(
+            temporary, classify(""), temporary_profile
+        )
+
+        self.assertFalse(long_term_decision.eligible)
+        self.assertIn("rental_duration_mismatch", long_term_decision.rejection_reasons)
+        self.assertTrue(temporary_decision.eligible)
+
+    def test_unknown_rental_duration_is_not_mislabelled(self) -> None:
+        listing = Listing(price_eur=900, municipality="Madrid", bedrooms=1)
+
+        decision = evaluate_listing(listing, classify(""), self.profile)
+
+        self.assertTrue(decision.eligible)
+        self.assertIn("rental_duration_not_disclosed", decision.preference_notes)
 
 
 if __name__ == "__main__":

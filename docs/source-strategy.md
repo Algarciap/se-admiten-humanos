@@ -37,8 +37,9 @@ users, but no Fotocasa alert or parser is enabled.
 - Promora and similar premium agencies should only be enabled when the configured maximum rent overlaps
   their inventory.
 - Milanuncios should remain manual until fraud and contact safeguards are implemented.
-- Room and temporary-stay platforms should be a separate search profile; mixing them with long-term
-  homes makes alerts noisy and can hide extra fees or duration restrictions.
+- Room platforms remain a separate product category. Temporary and long-term homes are normalized
+  explicitly and selected per search profile; adverts that do not state a duration stay labelled
+  “not specified.”
 
 ## Acquisition rules
 
@@ -58,8 +59,9 @@ users, but no Fotocasa alert or parser is enabled.
   it for discovery, fetches detail pages only for unseen IDs, and treats the daily email as fallback.
 - Tecnocasa publishes compressed property sitemaps. The adapter keeps only residential rentals in
   Madrid city and reads its server-rendered listing object without calling private API routes.
-- Redpiso publishes a property sitemap and schema.org listing data. The adapter keeps long-term
-  Madrid-region rentals; each user's municipality and budget filters are applied later.
+- Redpiso publishes a property sitemap and schema.org listing data. The adapter keeps residential
+  long-term and temporary Madrid-region rentals; each user's duration, municipality, and budget
+  filters are applied later.
 - Wolo exposes an `Acepta mascotas` filter and states accepted, rejected, or pending pet status in
   individual listings. It also supports direct visit booking, making it a high-priority manual source.
 - Testa Homes exposes an `Acepta mascotas` characteristic in its first-party inventory.

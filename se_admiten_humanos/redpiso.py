@@ -13,7 +13,8 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 from xml.etree import ElementTree
 
-from .models import Listing, WebsiteDiscovery
+from .models import Listing, RentalDuration, WebsiteDiscovery
+from .rental_duration import classify_rental_duration
 
 
 SOURCE_ID = "redpiso"
@@ -114,7 +115,7 @@ def parse_sitemap(xml_text: str) -> tuple[WebsiteDiscovery, ...]:
             or parsed.query
             or parsed.fragment
             or match is None
-            or "-en-alquiler-en-" not in slug
+            or not any(marker in slug for marker in ("-en-alquiler-en-", "-alquiler-temporal-", "-alquiler-de-temporada-"))
             or "vacacional" in slug
             or not slug.endswith("-madrid")
         ):
@@ -181,6 +182,14 @@ def parse_listing(html_text: str, discovery: WebsiteDiscovery) -> Listing:
     area_match = re.search(r"(?P<area>[0-9]+)\s*m", schema_description, re.I)
     bedroom_match = re.search(r"\b(?P<count>[0-9]+)\s+dorm", description, re.I)
     normalized = description.casefold()
+    category_default = (
+        RentalDuration.TEMPORARY
+        if "temporal" in discovery.url.casefold() or "temporada" in discovery.url.casefold()
+        else RentalDuration.LONG_TERM
+    )
+    rental_duration, duration_evidence = classify_rental_duration(
+        f"{title} {description}", category_default=category_default
+    )
     furnished: bool | None = None
     if "sin amueblar" in normalized:
         furnished = False
@@ -199,6 +208,8 @@ def parse_listing(html_text: str, discovery: WebsiteDiscovery) -> Listing:
         area_sqm=int(area_match.group("area")) if area_match else None,
         is_furnished=furnished,
         description=description,
+        rental_duration=rental_duration,
+        rental_duration_evidence=duration_evidence,
         url=discovery.url,
         contact_name=parser.property_meta.get("data-office-name", "Redpiso"),
         contact_email=parser.property_meta.get("data-office-email", ""),

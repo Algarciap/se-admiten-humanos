@@ -11,7 +11,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-from .models import Listing, PetDecision, PetStatus
+from .models import Listing, PetDecision, PetStatus, RentalDuration
 from .persistence import RentalStore
 from .pipeline import ProcessingResult, ProfileMatchOutcome
 
@@ -23,6 +23,11 @@ _PET_LABELS = {
     PetStatus.CONDITIONAL: "con condiciones",
     PetStatus.NOT_SPECIFIED: "no especificado",
     PetStatus.REJECTED: "no admitidas",
+}
+_DURATION_LABELS = {
+    RentalDuration.LONG_TERM: "larga duración",
+    RentalDuration.TEMPORARY: "temporal",
+    RentalDuration.NOT_SPECIFIED: "no especificado",
 }
 
 
@@ -67,6 +72,9 @@ def format_alert(
         lines.append("Evidencia: el anuncio no menciona mascotas")
     elif pet_decision.evidence:
         lines.append(f"Evidencia: {pet_decision.evidence}")
+    lines.append(f"Tipo de alquiler: {_DURATION_LABELS[listing.rental_duration]}")
+    if listing.rental_duration_evidence:
+        lines.append(f"Evidencia de duración: {listing.rental_duration_evidence}")
     lines.extend(("", f"Búsqueda: {outcome.profile.name}", f"Fuente: {listing.source_id}"))
     return "\n".join(lines)[:4096]
 

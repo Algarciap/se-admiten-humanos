@@ -1,6 +1,6 @@
 """Core domain logic for Se admiten humanos."""
 
-from .models import Listing, Pet, PetDecision, PetStatus, RenterProfile, User
+from .models import Listing, Pet, PetDecision, PetStatus, RentalDuration, RenterProfile, User
 from .pet_policy import classify
 from .pipeline import ListingPipeline, ProcessingResult, ProfileMatchOutcome
 from .persistence import ListingStore, MatchResult, RentalStore, UpsertResult
@@ -17,6 +17,7 @@ __all__ = [
     "Pet",
     "PetDecision",
     "PetStatus",
+    "RentalDuration",
     "RenterProfile",
     "User",
     "ListingStore",
