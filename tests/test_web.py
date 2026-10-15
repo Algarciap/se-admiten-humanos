@@ -173,6 +173,8 @@ class WebTests(unittest.TestCase):
         self.assertIn("<h3>Tipo</h3>", page)
         self.assertIn("<h3>Flexibilidad</h3>", page)
         self.assertNotIn('class="checks"', page)
+        self.assertIn("Presupuesto preferido al mes (€)", page)
+        self.assertNotIn("Presupuesto preferido al mes <span>€</span>", page)
 
 
 if __name__ == "__main__":
