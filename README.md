@@ -47,6 +47,31 @@ The project deliberately separates discovery, classification, notification, and 
    `rejected`, with the relevant phrase retained as evidence.
 4. Listings are filtered against each user's search profile and deduplicated across sources.
 5. Matching listings are sent to the correct private Telegram chat.
+
+## Web onboarding
+
+The Railway service now hosts a Spanish onboarding page as well as the background watcher. A person
+can enter their own rent ceiling, Madrid districts, bedroom flexibility, furnishing preference,
+move-in needs, employment details, and animals. The form writes a user-owned renter and search
+profile directly to the same SQLite database used by matching, then creates a ten-minute Telegram
+connection link.
+
+The first MVP uses an opaque, browser-bound session cookie: only its SHA-256 digest is stored, it is
+`HttpOnly`, `Secure`, and `SameSite=Lax`, and state-changing forms require a separate CSRF token.
+Returning with the same browser allows the person to edit their profile. There is deliberately no
+pretence of a finished account system yet: email is not verified, and account recovery across devices
+is the next identity milestone.
+
+For a local HTTP preview only:
+
+```powershell
+$env:TELEGRAM_BOT_USERNAME='SeAdmitenHumanosBot'
+$env:WEB_COOKIE_SECURE='false'
+python -m se_admiten_humanos run-web
+```
+
+Production uses `run-service`, which serves HTTP on Railway's `PORT` while the single background
+thread continues three-minute property checks. `/health` is the deployment health endpoint.
 6. An approved outreach message is drafted. Automatic delivery is enabled only for explicitly
    allow-listed direct agency email channels.
 
@@ -140,8 +165,8 @@ structurally changed pages fail visibly. See
 
 ## Run continuously on Railway
 
-The initial hosted deployment uses one Railway background worker and one persistent volume. The
-worker runs continuously and performs a check every three minutes; it does not rely on Railway cron
+The initial hosted deployment uses one Railway service and one persistent volume. Its background
+worker performs a check every three minutes while the same process serves web onboarding; it does not rely on Railway cron
 and it does not require a personal computer to remain on. SQLite is appropriate for this single
 worker, but the service must remain at one replica and the database must live on the mounted volume.
 

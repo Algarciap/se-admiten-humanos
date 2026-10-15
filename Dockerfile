@@ -9,4 +9,4 @@ COPY pyproject.toml README.md LICENSE ./
 COPY se_admiten_humanos ./se_admiten_humanos
 RUN pip install --no-cache-dir .
 
-CMD ["se-admiten-humanos", "run-worker"]
+CMD ["se-admiten-humanos", "run-service"]

@@ -12,11 +12,11 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from .models import Listing, PetDecision, RenterProfile, User, WebsiteDiscovery
+from .models import Listing, Pet, PetDecision, RenterProfile, User, WebsiteDiscovery
 from .search_profile import SearchDecision, SearchProfile
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 _TELEGRAM_CHAT_ID = re.compile(r"-?[1-9][0-9]*")
 
@@ -191,26 +191,34 @@ class RentalStore:
             self._migrate_v3_to_v4()
             self._migrate_v4_to_v5()
             self._migrate_v5_to_v6()
+            self._migrate_v6_to_v7()
         elif version == 1:
             self._migrate_v1_to_v2()
             self._migrate_v2_to_v3()
             self._migrate_v3_to_v4()
             self._migrate_v4_to_v5()
             self._migrate_v5_to_v6()
+            self._migrate_v6_to_v7()
         elif version == 2:
             self._migrate_v2_to_v3()
             self._migrate_v3_to_v4()
             self._migrate_v4_to_v5()
             self._migrate_v5_to_v6()
+            self._migrate_v6_to_v7()
         elif version == 3:
             self._migrate_v3_to_v4()
             self._migrate_v4_to_v5()
             self._migrate_v5_to_v6()
+            self._migrate_v6_to_v7()
         elif version == 4:
             self._migrate_v4_to_v5()
             self._migrate_v5_to_v6()
+            self._migrate_v6_to_v7()
         elif version == 5:
             self._migrate_v5_to_v6()
+            self._migrate_v6_to_v7()
+        elif version == 6:
+            self._migrate_v6_to_v7()
         elif version != SCHEMA_VERSION:
             raise RuntimeError(
                 f"Unsupported database schema version {version}; expected {SCHEMA_VERSION}"
@@ -434,6 +442,25 @@ class RentalStore:
             );
 
             pragma user_version = 6;
+            """
+        )
+        self.connection.commit()
+
+    def _migrate_v6_to_v7(self) -> None:
+        self.connection.executescript(
+            """
+            create table if not exists web_sessions (
+                token_hash text primary key,
+                user_id text not null references users(id) on delete cascade,
+                expires_at text not null,
+                created_at text not null,
+                last_seen_at text not null
+            );
+
+            create index if not exists web_sessions_user_idx
+                on web_sessions(user_id, expires_at);
+
+            pragma user_version = 7;
             """
         )
         self.connection.commit()
@@ -739,6 +766,90 @@ class RentalStore:
                 (user.id, user.display_name, user.email, now, now),
             )
 
+    def load_user(self, user_id: str) -> User:
+        """Load one account without exposing any other user's data."""
+
+        row = self.connection.execute(
+            "select id, display_name, email from users where id = ?",
+            (user_id.strip(),),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"Unknown user: {user_id}")
+        return User(id=str(row[0]), display_name=str(row[1]), email=str(row[2]))
+
+    def save_web_session(
+        self,
+        token_hash: str,
+        user_id: str,
+        expires_at: datetime,
+    ) -> None:
+        """Persist an opaque browser session by digest, never by raw token."""
+
+        normalized_hash = token_hash.strip().casefold()
+        if not re.fullmatch(r"[0-9a-f]{64}", normalized_hash):
+            raise ValueError("Web session token hash must be SHA-256")
+        self._require_user(user_id.strip())
+        if expires_at.tzinfo is None:
+            raise ValueError("Web session expiry must include a timezone")
+        now = _utc_now()
+        expiry = expires_at.astimezone(UTC).isoformat()
+        if expiry <= now:
+            raise ValueError("Web session expiry must be in the future")
+        with self.connection:
+            self.connection.execute(
+                """
+                insert into web_sessions (
+                    token_hash, user_id, expires_at, created_at, last_seen_at
+                ) values (?, ?, ?, ?, ?)
+                """,
+                (normalized_hash, user_id.strip(), expiry, now, now),
+            )
+
+    def web_session_user_id(
+        self,
+        token_hash: str,
+        *,
+        now: datetime | None = None,
+    ) -> str | None:
+        """Resolve and refresh one unexpired browser session."""
+
+        normalized_hash = token_hash.strip().casefold()
+        if not re.fullmatch(r"[0-9a-f]{64}", normalized_hash):
+            return None
+        current = datetime.now(UTC) if now is None else now
+        if current.tzinfo is None:
+            raise ValueError("Web session lookup time must include a timezone")
+        timestamp = current.astimezone(UTC).isoformat()
+        with self.connection:
+            row = self.connection.execute(
+                """
+                select user_id
+                from web_sessions
+                where token_hash = ? and expires_at > ?
+                """,
+                (normalized_hash, timestamp),
+            ).fetchone()
+            if row is None:
+                self.connection.execute(
+                    "delete from web_sessions where token_hash = ?",
+                    (normalized_hash,),
+                )
+                return None
+            self.connection.execute(
+                "update web_sessions set last_seen_at = ? where token_hash = ?",
+                (timestamp, normalized_hash),
+            )
+        return str(row[0])
+
+    def delete_web_session(self, token_hash: str) -> None:
+        """Revoke one browser session."""
+
+        with self.connection:
+            self.connection.execute(
+                "delete from web_sessions where token_hash = ?",
+                (token_hash.strip().casefold(),),
+            )
+
     def save_telegram_destination(
         self,
         user_id: str,
@@ -992,6 +1103,52 @@ class RentalStore:
                 ),
             )
 
+    def load_primary_renter_profile(self, user_id: str) -> RenterProfile | None:
+        """Load the first renter profile owned by a user for web editing."""
+
+        row = self.connection.execute(
+            """
+            select id, user_id, label, sender_name, renter_name,
+                   monthly_income_eur, job, contract_type
+            from renter_profiles
+            where user_id = ?
+            order by created_at, id
+            limit 1
+            """,
+            (user_id.strip(),),
+        ).fetchone()
+        if row is None:
+            return None
+        pet_rows = self.connection.execute(
+            """
+            select id, species, count, name, notes
+            from pets
+            where renter_profile_id = ?
+            order by id
+            """,
+            (row[0],),
+        ).fetchall()
+        return RenterProfile(
+            id=str(row[0]),
+            user_id=str(row[1]),
+            label=str(row[2]),
+            sender_name=str(row[3]),
+            renter_name=str(row[4]),
+            monthly_income_eur=(int(row[5]) if row[5] is not None else None),
+            job=str(row[6]),
+            contract_type=str(row[7]),
+            pets=tuple(
+                Pet(
+                    id=str(pet[0]),
+                    species=str(pet[1]),
+                    count=int(pet[2]),
+                    name=str(pet[3]),
+                    notes=str(pet[4]),
+                )
+                for pet in pet_rows
+            ),
+        )
+
     def save_search_profile(self, profile: SearchProfile) -> None:
         """Create or update one independently matchable search."""
 
@@ -1077,6 +1234,26 @@ class RentalStore:
         if row is None:
             raise KeyError(f"Unknown search profile: {profile_id}")
         return self._search_profile_from_row(row)
+
+    def load_primary_search_profile(self, user_id: str) -> SearchProfile | None:
+        """Load the first search owned by a user for web editing."""
+
+        row = self.connection.execute(
+            """
+            select
+                id, user_id, name, max_rent_eur, municipality,
+                renter_profile_id, acceptable_districts_json,
+                preferred_min_bedrooms, allow_studios,
+                allow_unknown_bedrooms, furnished, move_in_asap, move_in_by,
+                requires_pet_acceptance, enabled
+            from search_profiles
+            where user_id = ?
+            order by created_at, id
+            limit 1
+            """,
+            (user_id.strip(),),
+        ).fetchone()
+        return self._search_profile_from_row(row) if row is not None else None
 
     def load_enabled_search_profiles(self) -> tuple[SearchProfile, ...]:
         """Load every active search in deterministic order for matching."""

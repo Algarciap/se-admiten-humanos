@@ -3,8 +3,9 @@
 This is the initial hosted topology for `Se admiten humanos`:
 
 ```text
-Railway background worker (one replica)
+Railway combined web + worker service (one replica)
     ├── polls Alquiler Seguro every 180 seconds
+    ├── accepts user-owned search profiles over HTTPS
     ├── sends eligible new listings to Telegram
     └── reads/writes /data/rentals.sqlite3
                       │
@@ -41,6 +42,8 @@ private.
 | `MAX_CONSECUTIVE_FAILURES` | `3` |
 | `TELEGRAM_BOT_TOKEN` | BotFather token |
 | `TELEGRAM_BOT_USERNAME` | Bot username without `@`; enables secure `/start` link polling |
+| `PORT` | Injected automatically by Railway; local default is `8080` |
+| `WEB_COOKIE_SECURE` | Keep `true` in production |
 | `TELEGRAM_CHAT_ID` | Legacy bootstrap: first user's numeric private chat id |
 | `TELEGRAM_USER_ID` | Legacy bootstrap: first user's application id |
 | `PROFILE_BUNDLE_JSON` | Entire private profile file as one JSON value |
@@ -72,6 +75,17 @@ The first successful worker cycle performs these operations in order:
 4. Discovers the current Alquiler Seguro inventory.
 5. Records every current listing id as the no-alert baseline.
 6. Writes a `baseline_created` event to the Railway logs and sends zero property alerts.
+
+## Public networking
+
+The container now runs `se-admiten-humanos run-service`. Railway routes HTTPS traffic to its injected
+`PORT`, and `/health` must return `{"status": "ok"}` before a deployment becomes healthy. Generate one
+Railway domain under the service's Networking settings and share that HTTPS URL only after testing a
+complete form submission and Telegram connection. Do not set `WEB_COOKIE_SECURE=false` in Railway.
+
+The onboarding session is currently tied to one browser. Email verification, cross-device sign-in,
+account recovery, abuse controls, and administrative deletion tools are required before broad public
+promotion; this release is suitable for a small invited pilot.
 
 On the next cycle, the worker constructs the Telegram notifier and performs a normal live check.
 That cycle also migrates the first user's legacy environment mapping into the database.

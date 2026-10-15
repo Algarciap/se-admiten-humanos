@@ -26,6 +26,11 @@ from .idealista import (
 from .pet_policy import classify
 from .persistence import RentalStore
 from .profile_config import load_profile_bundle
+from .service import (
+    run_combined_service,
+    run_web_server,
+    web_settings_from_environment,
+)
 from .source_registry import default_registry
 from .telegram import (
     TelegramBotClient,
@@ -255,6 +260,24 @@ def _build_parser() -> argparse.ArgumentParser:
         default=".env",
         help="environment file to load when present (default: .env)",
     )
+    web_parser = subparsers.add_parser(
+        "run-web",
+        help="serve the onboarding website without starting the parser worker",
+    )
+    web_parser.add_argument(
+        "--env-file",
+        default=".env",
+        help="environment file to load when present (default: .env)",
+    )
+    service_parser = subparsers.add_parser(
+        "run-service",
+        help="serve onboarding and run the parser worker in one process",
+    )
+    service_parser.add_argument(
+        "--env-file",
+        default=".env",
+        help="environment file to load when present (default: .env)",
+    )
     return parser
 
 
@@ -452,5 +475,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
         except KeyboardInterrupt:
             print("Worker stopped.", file=sys.stderr)
+            return 130
+    if args.command in {"run-web", "run-service"}:
+        try:
+            _load_environment_file(args.env_file)
+            web_settings, port = web_settings_from_environment()
+            if args.command == "run-web":
+                return run_web_server(web_settings, port)
+            worker_settings = WorkerSettings.from_environment()
+            return run_combined_service(worker_settings, web_settings, port)
+        except (ValueError, WorkerConfigurationError) as error:
+            print(f"Service configuration is invalid: {error}", file=sys.stderr)
+            return 2
+        except KeyboardInterrupt:
+            print("Service stopped.", file=sys.stderr)
             return 130
     return 2
