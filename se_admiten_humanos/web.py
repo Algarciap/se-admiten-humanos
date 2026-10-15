@@ -202,9 +202,21 @@ class WebApplication:
                 return self._respond(
                     start_response,
                     "200 OK",
-                    _saved_page(state, telegram_url, telegram_error),
+                    _saved_page(state, telegram_url, telegram_error, connected=bool(store.telegram_chat_id(state.user.id))),
                     cookies=tuple(response_cookies),
                 )
+            if path == "/telegram-status" and method == "GET":
+                if user_id is None:
+                    return self._redirect(start_response, "/")
+                connected = bool(store.telegram_chat_id(user_id))
+                message = (
+                    "Telegram está conectado. Si tus avisos están activos, recibirás allí los anuncios que encajen contigo."
+                    if connected else
+                    "Todavía no hemos confirmado la conexión. Abre el enlace de Telegram y pulsa Iniciar / Start. La confirmación puede tardar hasta 3 minutos. No enviamos un correo por conectar Telegram."
+                )
+                return self._respond(start_response, "200 OK", _layout(
+                    "Estado de Telegram", f'<main class="center"><section class="success"><h1>{"Telegram conectado" if connected else "Conexión pendiente"}</h1><p>{message}</p><a class="primary button" href="/telegram-status">Comprobar de nuevo</a><a href="/account">Mi cuenta</a><a href="/">Volver a mi búsqueda</a></section></main>'
+                ))
             if path == "/telegram-link" and method == "POST":
                 if user_id is None:
                     return self._redirect(start_response, "/")
@@ -548,6 +560,17 @@ def _checked(value: bool) -> str:
     return " checked" if value else ""
 
 
+def _count_control(name: str, value: str, label: str, minimum: int = 0, required: bool = False) -> str:
+    safe_label = html.escape(label, quote=True)
+    return (
+        f'<span class="count-control" data-count-control>'
+        f'<button type="button" data-count-delta="-1" aria-label="Reducir {safe_label}" hidden>−</button>'
+        f'<input id="{name}" name="{name}" value="{value}" type="number" inputmode="numeric" min="{minimum}" max="10"'
+        f'{" required" if required else ""}>'
+        f'<button type="button" data-count-delta="1" aria-label="Aumentar {safe_label}" hidden>+</button></span>'
+    )
+
+
 def _profile_page(
     state: PageState,
     csrf: str,
@@ -625,9 +648,9 @@ def _profile_page(
         <p class="required-note"><span aria-hidden="true">*</span> Campos obligatorios</p>
         <ol class="form-progress" aria-label="Progreso del formulario"><li><button type="button" data-step-button="0" aria-current="step"><span>1</span> Búsqueda</button></li><li><button type="button" data-step-button="1"><span>2</span> Personas</button></li><li><button type="button" data-step-button="2"><span>3</span> Animales</button></li></ol>
         <fieldset class="wizard-step" data-step="0"><legend>1 · Presupuesto y zona</legend><div class="grid">
-          <label>Presupuesto mensual (€) <span class="required" aria-hidden="true">*</span><small>La cantidad que quieres pagar habitualmente.</small><input required type="number" min="300" max="10000" name="max_rent_eur" value="{_value(form, 'max_rent_eur')}"></label>
-          <label>Máximo excepcional (€) <small>Opcional · solo se usa en modo urgente.</small><input type="number" min="300" max="10000" name="stretch_max_rent_eur" value="{_value(form, 'stretch_max_rent_eur')}" placeholder="Ej. 1000"></label>
-          <label>Número mínimo de dormitorios <span class="required" aria-hidden="true">*</span><input required type="number" min="0" max="10" name="preferred_min_bedrooms" value="{_value(form, 'preferred_min_bedrooms')}"></label>
+          <label>Presupuesto mensual (€) <span class="required" aria-hidden="true">*</span><small>La cantidad que quieres pagar habitualmente.</small><input required type="number" inputmode="numeric" min="300" max="10000" name="max_rent_eur" value="{_value(form, 'max_rent_eur')}"></label>
+          <label>Máximo excepcional (€) <small>Opcional · solo se usa en modo urgente.</small><input type="number" inputmode="numeric" min="300" max="10000" name="stretch_max_rent_eur" value="{_value(form, 'stretch_max_rent_eur')}" placeholder="Ej. 1000"></label>
+          <div class="field-group"><label for="preferred_min_bedrooms">Número mínimo de dormitorios <span class="required" aria-hidden="true">*</span></label>{_count_control('preferred_min_bedrooms', _value(form, 'preferred_min_bedrooms'), 'dormitorios', 0, True)}</div>
           <div class="wide field-group"><span class="field-label">Distritos <small>Opcional · sin selección buscaremos en todo Madrid.</small></span><details class="district-picker"><summary data-district-summary>{html.escape(district_summary)}</summary><div class="district-options">{district_options}</div></details></div>
           <label>Mobiliario <small>Opcional</small><select name="furnished"><option value="any"{' selected' if furnished == 'any' else ''}>Me da igual</option><option value="yes"{' selected' if furnished == 'yes' else ''}>Amueblado</option><option value="no"{' selected' if furnished == 'no' else ''}>Sin amueblar</option></select></label>
           <label>Tipo de alquiler <span class="required" aria-hidden="true">*</span><select required name="rental_duration"><option value="" disabled{' selected' if not rental_duration else ''}>Elige una opción</option><option value="long_term"{' selected' if rental_duration == 'long_term' else ''}>Larga duración</option><option value="temporary"{' selected' if rental_duration == 'temporary' else ''}>Temporal / por temporada</option><option value="both"{' selected' if rental_duration == 'both' else ''}>Ambos</option></select></label>
@@ -640,15 +663,15 @@ def _profile_page(
         <fieldset class="wizard-step" data-step="1"><legend>2 · Personas y situación</legend><div class="grid">
           <label>Tu nombre <span class="required" aria-hidden="true">*</span><input required maxlength="100" name="display_name" value="{_value(form, 'display_name')}"></label>
           {('<p class="account-note">Gestiona tu correo verificado en <a href="/account">Mi cuenta</a>.</p>' if accounts_enabled else f'<label>Correo <small>Opcional · aún no enviamos emails.</small><input type="email" maxlength="254" name="email" value="{_value(form, "email")}"></label>')}
-          <label>Personas que vivirán en la vivienda <span class="required" aria-hidden="true">*</span><input required type="number" min="1" max="10" name="household_size" value="{_value(form, 'household_size', 1)}"></label>
+          <div class="field-group"><label for="household_size">Personas que vivirán en la vivienda <span class="required" aria-hidden="true">*</span></label>{_count_control('household_size', _value(form, 'household_size', 1), 'personas', 1, True)}</div>
           <label>Nombre de la persona o personas inquilinas <span class="required" aria-hidden="true">*</span><input required maxlength="100" name="renter_name" value="{_value(form, 'renter_name')}" placeholder="Ej. Ana y Luis"></label>
           <label>Nombre para contactar a la agencia <span class="required" aria-hidden="true">*</span><input required maxlength="100" name="sender_name" value="{_value(form, 'sender_name')}"></label>
-          <label>Ingresos mensuales (€) <small>Opcional</small><input type="number" min="1" max="100000" name="monthly_income_eur" value="{_value(form, 'monthly_income_eur')}"></label>
+          <label>Ingresos mensuales (€) <small>Opcional</small><input type="number" inputmode="numeric" min="1" max="100000" name="monthly_income_eur" value="{_value(form, 'monthly_income_eur')}"></label>
           <label>Trabajo <small>Opcional</small><input maxlength="160" name="job" value="{_value(form, 'job')}" placeholder="Stage manager, docente…"></label>
           <label>Tipo de contrato <small>Opcional</small><input maxlength="120" name="contract_type" value="{_value(form, 'contract_type')}" placeholder="Indefinido, autónomo…"></label>
         </div><div class="wizard-nav"><button class="secondary-step" type="button" data-back>← Atrás</button><button class="primary next-step" type="button" data-next>Continuar →</button></div></fieldset>
         <fieldset class="wizard-step" data-step="2"><legend>3 · Animales <span class="optional">Opcional</span></legend><p class="section-intro">Si convivirán contigo, los tendremos en cuenta al revisar cada anuncio.</p><div class="grid">
-          <label>¿Cuántos animales vivirán contigo? <small>Opcional</small><input type="number" min="0" max="10" name="pet_count" value="{_value(form, 'pet_count')}"></label>
+          <div class="field-group"><label for="pet_count">¿Cuántos animales vivirán contigo? <small>Opcional</small></label>{_count_control('pet_count', _value(form, 'pet_count'), 'animales', 0, False)}</div>
           <label>¿Qué animales son? <small>Opcional</small><input maxlength="80" name="pet_species" value="{_value(form, 'pet_species')}" placeholder="Gato, perro…"></label>
           <label class="wide">Algo útil sobre ellos <small>Opcional</small><textarea maxlength="300" name="pet_notes" placeholder="Edad, tamaño, comportamiento…">{_value(form, 'pet_notes')}</textarea></label>
         </div><div class="wizard-nav"><button class="secondary-step" type="button" data-back>← Atrás</button><button class="primary" type="submit">Guardar y conectar Telegram →</button></div></fieldset>
@@ -661,18 +684,22 @@ def _profile_page(
     return _layout("Tu búsqueda · Se admiten humanos", body)
 
 
-def _saved_page(state: PageState, telegram_url: str, error: str) -> str:
+def _saved_page(state: PageState, telegram_url: str, error: str, connected: bool = False) -> str:
     assert state.search is not None
     action = f'<a class="primary button" href="{html.escape(telegram_url, quote=True)}">Conectar mi Telegram →</a>' if telegram_url else f'<div class="error">{html.escape(error)}</div><a class="secondary button" href="/">Volver a intentarlo</a>'
+    if connected:
+        action = '<p class="connection-status">✓ Telegram conectado. Tu búsqueda se ha actualizado.</p><a href="/telegram-status">Comprobar conexión</a>'
+    else:
+        action += '<p>Abre Telegram y pulsa <strong>Iniciar / Start</strong>. La confirmación puede tardar hasta 3 minutos. No enviamos un correo por este paso.</p><a href="/telegram-status">Comprobar si Telegram está conectado</a>'
     budget_text = f"Presupuesto preferido: <strong>{state.search.max_rent_eur} €</strong>"
     if state.search.urgent and state.search.stretch_max_rent_eur is not None:
         budget_text += f"; sugerencias urgentes hasta <strong>{state.search.stretch_max_rent_eur} €</strong>"
-    body = f"""<header><a class="brand" href="/">Se admiten humanos</a><span class="badge" aria-label="Búsqueda guardada">Guardada</span></header><main class="center"><section class="success"><div class="success-mark">✓</div><p class="eyebrow">Ya sabemos qué buscar</p><h1>Tu búsqueda está lista.</h1><p>{budget_text} al mes en Madrid. Ahora conecta Telegram para recibir solamente los anuncios que encajen contigo.</p>{action}<small>El enlace de Telegram caduca en 10 minutos y solo funciona una vez.</small><a href="/">← Revisar o cambiar mis datos</a></section></main>"""
+    body = f"""<header><a class="brand" href="/">Se admiten humanos</a><span class="badge" aria-label="Búsqueda guardada">Guardada</span></header><main class="center"><section class="success"><div class="success-mark">✓</div><p class="eyebrow">Ya sabemos qué buscar</p><h1>Tu búsqueda está lista.</h1><p>{budget_text} al mes en Madrid. Los avisos de anuncios se reciben por Telegram.</p>{action}{'' if connected else '<small>El enlace de Telegram caduca en 10 minutos y solo funciona una vez.</small>'}<a href="/">← Revisar o cambiar mis datos</a></section></main>"""
     return _layout("Búsqueda guardada · Se admiten humanos", body)
 
 
 def _telegram_page(url: str) -> str:
-    return _layout("Conectar Telegram · Se admiten humanos", f"""<header><a class="brand" href="/">Se admiten humanos</a></header><main class="center"><section class="success"><p class="eyebrow">Último paso</p><h1>Conecta Telegram.</h1><p>Este enlace es personal, caduca en 10 minutos y solo se puede usar una vez.</p><a class="primary button" href="{html.escape(url, quote=True)}">Abrir Telegram →</a><a href="/">← Volver a mi búsqueda</a></section></main>""")
+    return _layout("Conectar Telegram · Se admiten humanos", f"""<header><a class="brand" href="/">Se admiten humanos</a></header><main class="center"><section class="success"><p class="eyebrow">Último paso</p><h1>Conecta Telegram.</h1><p>Abre Telegram y pulsa <strong>Iniciar / Start</strong>. La confirmación puede tardar hasta 3 minutos. No enviamos un correo por este paso.</p><p>Este enlace es personal, caduca en 10 minutos y solo se puede usar una vez.</p><a class="primary button" href="{html.escape(url, quote=True)}">Abrir Telegram →</a><a href="/telegram-status">Comprobar conexión</a><a href="/">← Volver a mi búsqueda</a></section></main>""")
 
 
 def _message_page(title: str, message: str) -> str:
@@ -752,6 +779,26 @@ _FORM_JS = """
 (() => {
   const form = document.querySelector('[data-wizard]');
   if (!form) return;
+  form.querySelectorAll('[data-count-control]').forEach((group) => {
+    const input = group.querySelector('input');
+    const buttons = [...group.querySelectorAll('button')];
+    const update = () => buttons.forEach((button) => {
+      button.disabled = input.value !== '' && (Number(button.dataset.countDelta) < 0
+        ? Number(input.value) <= Number(input.min) : Number(input.value) >= Number(input.max));
+    });
+    buttons.forEach((button) => {
+      button.hidden = false;
+      button.addEventListener('click', () => {
+        const current = input.value === '' || !Number.isFinite(input.valueAsNumber)
+          ? Number(input.min) : input.valueAsNumber;
+        input.value = Math.max(Number(input.min), Math.min(Number(input.max), current + Number(button.dataset.countDelta)));
+        input.dispatchEvent(new Event('input', {bubbles: true}));
+        input.dispatchEvent(new Event('change', {bubbles: true}));
+      });
+    });
+    input.addEventListener('input', update);
+    update();
+  });
   const steps = [...form.querySelectorAll('[data-step]')];
   const stepButtons = [...form.querySelectorAll('[data-step-button]')];
   let current = 0;
@@ -819,4 +866,8 @@ html{-webkit-text-size-adjust:100%;text-size-adjust:100%}.date-field{overflow:hi
 @media(max-width:720px){.status-main{padding-top:24px}.status-main h1{font-size:2.7rem}.status-table-wrap{overflow:visible}.status-table-wrap table{min-width:0}.status-table-wrap thead{display:none}.status-table-wrap table,.status-table-wrap tbody,.status-table-wrap tr,.status-table-wrap th,.status-table-wrap td{display:block}.status-table-wrap tr{padding:15px 16px;border-bottom:1px solid var(--line)}.status-table-wrap tr:last-child{border-bottom:0}.status-table-wrap th,.status-table-wrap td{border:0;padding:4px 0}.status-table-wrap tbody th{font-size:1.35rem;margin-bottom:5px}.status-table-wrap td{display:grid;grid-template-columns:105px minmax(0,1fr);gap:10px}.status-table-wrap td:before{content:attr(data-label);color:var(--muted);font-size:.72rem;font-weight:850;text-transform:uppercase;letter-spacing:.05em}.status-table-wrap .detail{max-width:none}}
 .promise span{border:0;border-left:3px solid var(--coral);border-radius:0;padding:2px 10px;color:var(--muted);font-size:.8rem}.required-note{text-align:right;color:var(--muted);font-size:.78rem;margin:18px 0 0}.required{color:var(--coral);font-weight:900}.field-group{display:flex;flex-direction:column;gap:5px;font-size:.9rem;font-weight:750}.field-label{display:flex;flex-direction:column;gap:3px}.field-label small{color:var(--muted);font-weight:400}.form-progress{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;list-style:none;margin:20px 0 0;padding:0}.form-progress button{width:100%;border:0;border-top:2px solid var(--line);background:transparent;color:var(--muted);padding:10px 4px;text-align:left;font:inherit;font-size:.78rem;font-weight:800;cursor:pointer}.form-progress button span{display:inline-grid;place-items:center;width:23px;height:23px;margin-right:5px;border-radius:50%;background:var(--line);color:var(--ink)}.form-progress button[aria-current=step]{border-color:var(--green);color:var(--green)}.form-progress button[aria-current=step] span{background:var(--lime)}.wizard-ready .wizard-step[hidden]{display:none}.wizard-step{padding:32px 0 36px}.wizard-step legend{margin-bottom:18px}.wizard-nav{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:28px}.wizard-nav-end{justify-content:flex-end}.wizard-nav .primary{width:auto;margin:0}.secondary-step{border:1px solid var(--ink);border-radius:4px;background:transparent;color:var(--ink);padding:12px 18px;font:inherit;font-weight:850;cursor:pointer}.district-picker{position:relative;border:1px solid #99a298;border-radius:4px;background:#fff}.district-picker summary{min-height:45px;padding:10px 40px 10px 12px;cursor:pointer;font-weight:500;list-style:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.district-picker summary::-webkit-details-marker{display:none}.district-picker summary:after{content:'⌄';position:absolute;right:14px;top:9px;color:var(--green);font-size:1.2rem}.district-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;border-top:1px solid var(--line);background:var(--line);max-height:250px;overflow:auto}.district-options label{display:grid;grid-template-columns:18px minmax(0,1fr);align-items:start;gap:8px;background:#fff;padding:10px;font-size:.82rem;font-weight:600}.district-options input{width:16px;height:16px;margin:1px 0 0;padding:0}.account-note{align-self:end;margin:0 0 9px}
 @media(max-width:720px){.form-progress button{font-size:.68rem}.form-progress button span{display:grid;margin:0 0 4px}.district-options{grid-template-columns:1fr 1fr}.wizard-step{padding:28px 0 32px}.wizard-nav{align-items:stretch}.wizard-nav button{flex:1;padding-left:10px;padding-right:10px}}
+
+input[type=number]{appearance:textfield;-moz-appearance:textfield}input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+.count-control{display:flex;align-items:stretch;gap:8px;min-width:0}.count-control input{flex:1;min-width:0;text-align:center}.count-control button{flex:0 0 46px;min-height:46px;border:1px solid var(--green);border-radius:4px;background:var(--paper);color:var(--green);font:inherit;font-size:1.4rem;cursor:pointer}.count-control button[hidden]{display:none}.count-control button:disabled{opacity:.4;cursor:default}.count-control button:focus-visible{outline:3px solid var(--lime)}
+select{appearance:none;-webkit-appearance:none;min-height:46px;padding-right:42px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath d='m4 6 4 4 4-4' fill='none' stroke='%231f5c45' stroke-width='2'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 14px center;background-size:16px}.district-picker summary{position:relative;min-height:46px}.district-picker summary:after{content:'';width:8px;height:8px;border-right:2px solid var(--green);border-bottom:2px solid var(--green);right:17px;top:50%;transform:translateY(-70%) rotate(45deg)}.district-picker[open] summary:after{transform:translateY(-30%) rotate(225deg)}
 """

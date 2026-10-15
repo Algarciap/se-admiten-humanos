@@ -149,6 +149,27 @@ class AccountTests(unittest.TestCase):
         self.request("POST", "/account/register", {"email": "ana@example.com"})
         self.assertEqual(len(self.messages), count)
 
+    def test_mail_failure_keeps_retry_and_recovery_available_without_leaking_account(self):
+        with patch("se_admiten_humanos.account_web.send_account_email", side_effect=AccountMailError("private")):
+            with self.assertLogs("se_admiten_humanos.account_web", level="ERROR") as logs:
+                status, _, body = self.request("POST", "/account/register", {"email": "ana@example.com"})
+        self.assertEqual(status, "200 OK")
+        self.assertIn("Volver a solicitar el enlace", body)
+        self.assertIn("Corregir correo", body)
+        self.assertNotIn("private", body)
+        self.assertNotIn("ana@example.com", str(logs.output))
+
+    def test_telegram_status_requires_session_and_uses_enabled_destination(self):
+        self.assertEqual(self.request("GET", "/telegram-status")[0], "303 See Other")
+        user_id = self.register()
+        self.assertIn("Conexión pendiente", self.request("GET", "/telegram-status")[2])
+        with RentalStore(self.database) as store:
+            store.save_telegram_destination(user_id, "123456")
+        self.assertIn("Telegram conectado", self.request("GET", "/telegram-status")[2])
+        self.assertNotIn("Conectar Telegram", self.request("GET", "/account")[2])
+        self.request("POST", "/account/disconnect")
+        self.assertIn("Conexión pendiente", self.request("GET", "/telegram-status")[2])
+
     def test_csrf_and_rate_limit_survive_new_application_instance(self):
         self.assertEqual(self.request("POST", "/account/register", {"email": "ana@example.com"}, csrf=False)[0], "403 Forbidden")
         for _ in range(8):

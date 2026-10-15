@@ -93,6 +93,11 @@ class MailSettings:
 class AccountMailError(RuntimeError):
     """Sanitized transport failure, without credentials, addresses or tokens."""
 
+    def __init__(self, message: str, *, category: str = "transport", status: int | None = None):
+        super().__init__(message)
+        self.category = category
+        self.status = status
+
 
 def send_account_email(settings: MailSettings, recipient: str, purpose: str, token: str) -> None:
     subject = "Verifica tu cuenta" if purpose == "verify" else "Recupera tu cuenta"
@@ -151,9 +156,11 @@ def send_account_email(settings: MailSettings, recipient: str, purpose: str, tok
         try:
             with urllib.request.urlopen(request, timeout=15) as response:
                 if not 200 <= response.status < 300:
-                    raise AccountMailError("No se pudo enviar el correo. Inténtalo más tarde.")
+                    raise AccountMailError("No se pudo enviar el correo. Inténtalo más tarde.", category="provider_http", status=response.status)
             return
-        except (OSError, urllib.error.URLError, urllib.error.HTTPError):
+        except urllib.error.HTTPError as error:
+            raise AccountMailError("No se pudo enviar el correo. Inténtalo más tarde.", category="provider_http", status=error.code) from None
+        except (OSError, urllib.error.URLError):
             raise AccountMailError("No se pudo enviar el correo. Inténtalo más tarde.") from None
 
     message = EmailMessage()

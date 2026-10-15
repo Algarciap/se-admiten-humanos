@@ -72,11 +72,14 @@ def handle_accounts(app, store, environ, start_response, user_id, cookies):
         if not row or not row[3]:
             return page("Protege tu búsqueda", '<p>Verifica tu correo para acceder desde otros dispositivos y recuperar tu cuenta.</p><a href="/account/register">Vincular esta búsqueda</a>')
         paused = bool(row[4])
-        content = f'<p>Correo verificado: {html.escape(row[1])}</p><p>Avisos: {"en pausa" if paused else "activos"}. Telegram: {"conectado" if store.telegram_destination_configured(user_id) else "desconectado"}.</p>'
+        content = f'<p>Correo verificado: {html.escape(row[1])}</p><p>Avisos: {"en pausa" if paused else "activos"}. Telegram: {"conectado" if bool(store.telegram_chat_id(user_id)) else "desconectado"}.</p>'
         content += _form("/account/pause", csrf, f'<input type="hidden" name="paused" value="{0 if paused else 1}">', "Reanudar avisos" if paused else "Pausar avisos")
         content += '<p>La pausa conserva tus criterios. Al reanudar, se avisará de próximos anuncios; no se reenvía el historial.</p>'
-        content += _form("/telegram-link", csrf, "", "Conectar Telegram")
-        content += _form("/account/disconnect", csrf, "", "Desconectar Telegram")
+        if store.telegram_chat_id(user_id):
+            content += _form("/account/disconnect", csrf, "", "Desconectar Telegram")
+        else:
+            content += _form("/telegram-link", csrf, "", "Conectar Telegram")
+            content += '<p>Abre Telegram y pulsa Iniciar / Start. La confirmación puede tardar hasta 3 minutos.</p><a href="/telegram-status">Comprobar conexión</a>'
         content += _form("/account/logout-all", csrf, password_field, "Cerrar todas las sesiones")
         content += '<h2>Tus datos</h2><p>Introduce tu contraseña para descargar tus datos o eliminar tu cuenta.</p>'
         content += _form("/account/export", csrf, password_field, "Descargar mis datos (JSON)")
@@ -113,11 +116,11 @@ def handle_accounts(app, store, environ, start_response, user_id, cookies):
         if token:
             try:
                 send_account_email(app.settings.mail, email, purpose, token)
-            except AccountMailError:
+            except AccountMailError as error:
                 # Same public response for existing and unknown accounts; operators see only type.
                 import logging
-                logging.getLogger(__name__).error("account_email_delivery_failed")
-        return page("Revisa tu correo", "<p>Si la solicitud es válida, recibirás un enlace que caduca en 30 minutos. Comprueba también la carpeta de correo no deseado.</p><a href=\"/account/login\">Volver a entrar</a>")
+                logging.getLogger(__name__).error("account_email_delivery_failed category=%s status=%s", error.category, error.status)
+        return page("Revisa tu correo", '<p>Si la solicitud es válida, recibirás un enlace que caduca en 30 minutos. Comprueba Spam y Promociones y espera unos minutos.</p><p>Si ya verificaste tu cuenta, entra con tu contraseña o solicita recuperar el acceso. Conectar Telegram no envía ningún correo.</p>' + _form(path, csrf, email_field, "Volver a solicitar el enlace") + '<p>Al solicitar otro enlace, el anterior deja de funcionar.</p><a href="/account/register">Corregir correo o verificar cuenta</a><a href="/account/recover">Recuperar acceso</a><a href="/account/login">Volver a entrar</a>')
     if path in {"/account/verify", "/account/reset"}:
         try:
             found = accounts.consume(form.get("token", "")[:128], path.rsplit("/", 1)[1], form.get("password", ""))
