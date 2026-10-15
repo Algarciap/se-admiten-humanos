@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import hmac
 import json
 import re
@@ -95,13 +96,41 @@ class AccountMailError(RuntimeError):
 
 def send_account_email(settings: MailSettings, recipient: str, purpose: str, token: str) -> None:
     subject = "Verifica tu cuenta" if purpose == "verify" else "Recupera tu cuenta"
+    action = "Verificar correo y elegir contraseña" if purpose == "verify" else "Elegir una nueva contraseña"
+    heading = "Tu casa empieza por aquí." if purpose == "verify" else "Volvamos a abrir la puerta."
+    intro = (
+        "Confirma que este correo es tuyo y crea la contraseña de tu cuenta."
+        if purpose == "verify"
+        else "Usa este enlace para elegir una contraseña nueva y recuperar tu cuenta."
+    )
+    url = f"{settings.public_url.rstrip('/')}/account/{purpose}?token={token}"
     content = (
         "Se admiten humanos\n\n"
-        + ("Verifica tu correo y elige tu contraseña" if purpose == "verify" else "Elige una nueva contraseña")
-        + f":\n{settings.public_url.rstrip('/')}/account/{purpose}?token={token}\n\n"
+        + f"{heading}\n\n{intro}\n\n{action}:\n{url}\n\n"
         + "El enlace es de un solo uso y caduca en 30 minutos. "
         + "Si no lo has solicitado, ignora este mensaje."
     )
+    safe_url = html.escape(url, quote=True)
+    html_content = f"""<!doctype html>
+<html lang="es"><body style="margin:0;background:#f5f1e8;color:#17231c;font-family:Inter,Arial,sans-serif;line-height:1.5">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f5f1e8;padding:32px 14px">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px">
+        <tr><td style="padding:0 0 18px;font-family:Georgia,serif;font-size:22px;font-weight:bold">Se admiten humanos</td></tr>
+        <tr><td style="background:#fffdf8;border:1px solid #17231c;padding:42px 36px;box-shadow:8px 8px 0 #17231c">
+          <div style="display:inline-block;background:#d9ef9f;border-radius:999px;padding:6px 11px;color:#1f5c45;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase">Tu cuenta</div>
+          <h1 style="margin:20px 0 14px;font-family:Georgia,serif;font-size:42px;line-height:1.05;letter-spacing:-1px">{heading}</h1>
+          <p style="margin:0 0 26px;color:#5d685f;font-size:17px">{intro}</p>
+          <a href="{safe_url}" style="display:inline-block;background:#1f5c45;border:1px solid #1f5c45;border-radius:4px;color:#ffffff;font-size:16px;font-weight:800;padding:14px 19px;text-decoration:none">{action} →</a>
+          <p style="margin:28px 0 8px;color:#5d685f;font-size:13px">Este enlace es personal, solo funciona una vez y caduca en 30 minutos.</p>
+          <p style="margin:0;color:#5d685f;font-size:13px">Si el botón no funciona, copia esta dirección:</p>
+          <p style="margin:5px 0 0;font-size:12px;word-break:break-all"><a href="{safe_url}" style="color:#1f5c45">{safe_url}</a></p>
+        </td></tr>
+        <tr><td style="padding:25px 4px;color:#5d685f;font-size:12px">Si no has solicitado este mensaje, puedes ignorarlo.</td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>"""
     if settings.brevo_api_key:
         request = urllib.request.Request(
             "https://api.brevo.com/v3/smtp/email",
@@ -110,6 +139,7 @@ def send_account_email(settings: MailSettings, recipient: str, purpose: str, tok
                 "to": [{"email": recipient}],
                 "subject": subject,
                 "textContent": content,
+                "htmlContent": html_content,
             }).encode(),
             headers={
                 "accept": "application/json",
@@ -131,6 +161,7 @@ def send_account_email(settings: MailSettings, recipient: str, purpose: str, tok
     message["To"] = recipient
     message["Subject"] = subject
     message.set_content(content)
+    message.add_alternative(html_content, subtype="html")
     context = ssl.create_default_context()
     try:
         if settings.implicit_tls:

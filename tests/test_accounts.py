@@ -328,6 +328,9 @@ class MailAndSettingsTests(unittest.TestCase):
         body = json.loads(request.data)
         self.assertEqual(body["to"], [{"email": "ana@example.com"}])
         self.assertIn("secret-token", body["textContent"])
+        self.assertIn("Tu casa empieza por aquí", body["htmlContent"])
+        self.assertIn("secret-token", body["htmlContent"])
+        self.assertIn("background:#f5f1e8", body["htmlContent"])
 
         with patch("se_admiten_humanos.accounts.urllib.request.urlopen", side_effect=urllib.error.URLError("sensitive")):
             with self.assertRaisesRegex(AccountMailError, "No se pudo enviar") as caught:
