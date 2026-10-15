@@ -159,6 +159,20 @@ class WebApplication:
         renter_name = _required(form, "renter_name", "Nombre de la persona inquilina", 100)
         sender_name = _required(form, "sender_name", "Nombre de contacto", 100)
         max_rent = _integer(form, "max_rent_eur", "Alquiler máximo", 300, 10_000)
+        urgent = "urgent" in form
+        stretch_max_rent = _optional_integer(
+            form,
+            "stretch_max_rent_eur",
+            "Máximo excepcional",
+            300,
+            10_000,
+        )
+        if not urgent:
+            stretch_max_rent = None
+        elif stretch_max_rent is not None and stretch_max_rent <= max_rent:
+            raise ValueError(
+                "El máximo excepcional debe ser mayor que tu presupuesto preferido."
+            )
         min_bedrooms = _integer(form, "preferred_min_bedrooms", "Dormitorios", 0, 10)
         income = _optional_integer(form, "monthly_income_eur", "Nómina", 1, 100_000)
         pet_count = _integer(form, "pet_count", "Número de animales", 0, 10)
@@ -228,6 +242,8 @@ class WebApplication:
             name="Madrid",
             max_rent_eur=max_rent,
             municipality="Madrid",
+            urgent=urgent,
+            stretch_max_rent_eur=stretch_max_rent,
             renter_profile_id=renter_id,
             acceptable_districts=districts,
             accepted_property_types=accepted_property_types,
@@ -411,6 +427,8 @@ def _profile_page(
         if search:
             form.update({
                 "max_rent_eur": search.max_rent_eur,
+                "urgent": "on" if search.urgent else "",
+                "stretch_max_rent_eur": search.stretch_max_rent_eur or "",
                 "preferred_min_bedrooms": search.preferred_min_bedrooms,
                 "acceptable_districts": ", ".join(search.acceptable_districts),
                 "property_type_home": "on" if PropertyType.HOME in search.accepted_property_types else "",
@@ -434,6 +452,7 @@ def _profile_page(
     rental_duration = form.get("rental_duration", "long_term")
     property_type_home = form.get("property_type_home", "on" if is_new else "") == "on"
     property_type_room = form.get("property_type_room", "") == "on"
+    urgent = form.get("urgent", "") == "on"
     error_html = f'<div class="error" role="alert">{html.escape(error)}</div>' if error else ""
     session_note = "Tus datos se guardan en este navegador y puedes volver para cambiarlos." if user else "No necesitas instalar nada. Al terminar conectarás tu Telegram."
     body = f"""
@@ -443,13 +462,14 @@ def _profile_page(
       <section class="panel"><div class="panel-head"><div><p class="step">Tu búsqueda</p><h2>{'Actualiza tus datos' if user else 'Cuéntanos qué necesitas'}</h2></div><p>{html.escape(session_note)}</p></div>{error_html}
       <form method="post" action="/profile"><input type="hidden" name="csrf_token" value="{html.escape(csrf, quote=True)}">
         <fieldset><legend>1 · Presupuesto y zona</legend><div class="grid">
-          <label>Alquiler máximo al mes <span>€</span><input required type="number" min="300" max="10000" name="max_rent_eur" value="{_value(form, 'max_rent_eur', 950)}"></label>
+          <label>Presupuesto preferido al mes <span>€</span><input required type="number" min="300" max="10000" name="max_rent_eur" value="{_value(form, 'max_rent_eur', 950)}"></label>
+          <label>Máximo excepcional <span>€</span><small>Opcional; solo se usa en modo urgente.</small><input type="number" min="300" max="10000" name="stretch_max_rent_eur" value="{_value(form, 'stretch_max_rent_eur')}" placeholder="1000"></label>
           <label>Dormitorios preferidos<input required type="number" min="0" max="10" name="preferred_min_bedrooms" value="{_value(form, 'preferred_min_bedrooms', 1)}"></label>
           <label class="wide">Distritos aceptables <small>Déjalo vacío para todo Madrid; separa varios con comas.</small><input name="acceptable_districts" value="{_value(form, 'acceptable_districts')}" placeholder="Centro, Chamberí, Retiro…"></label>
           <label>Mobiliario<select name="furnished"><option value="any"{' selected' if furnished == 'any' else ''}>Me da igual</option><option value="yes"{' selected' if furnished == 'yes' else ''}>Amueblado</option><option value="no"{' selected' if furnished == 'no' else ''}>Sin amueblar</option></select></label>
           <label>Tipo de alquiler<select name="rental_duration"><option value="long_term"{' selected' if rental_duration == 'long_term' else ''}>Larga duración</option><option value="temporary"{' selected' if rental_duration == 'temporary' else ''}>Temporal / por temporada</option><option value="both"{' selected' if rental_duration == 'both' else ''}>Ambos</option></select></label>
           <label>Fecha límite de entrada <small>Opcional</small><input type="date" name="move_in_by" value="{_value(form, 'move_in_by')}"></label>
-        </div><div class="checks"><label><input type="checkbox" name="property_type_home"{_checked(property_type_home)}> Vivienda completa</label><label><input type="checkbox" name="property_type_room"{_checked(property_type_room)}> Habitación</label><label><input type="checkbox" name="allow_studios"{_checked(studios)}> Incluir estudios</label><label><input type="checkbox" name="allow_unknown_bedrooms"{_checked(unknown)}> Incluir anuncios que no indican dormitorios</label><label><input type="checkbox" name="move_in_asap"{_checked(asap)}> Necesito entrar cuanto antes</label></div><small>Garajes y locales comerciales se excluyen siempre.</small></fieldset>
+        </div><div class="checks"><label><input type="checkbox" name="urgent"{_checked(urgent)}> Búsqueda urgente: aceptar sugerencias hasta mi máximo excepcional</label><label><input type="checkbox" name="property_type_home"{_checked(property_type_home)}> Vivienda completa</label><label><input type="checkbox" name="property_type_room"{_checked(property_type_room)}> Habitación</label><label><input type="checkbox" name="allow_studios"{_checked(studios)}> Incluir estudios</label><label><input type="checkbox" name="allow_unknown_bedrooms"{_checked(unknown)}> Incluir anuncios que no indican dormitorios</label><label><input type="checkbox" name="move_in_asap"{_checked(asap)}> Necesito entrar cuanto antes</label></div><small>Las sugerencias por encima del presupuesto se etiquetan claramente. Nunca superaremos el máximo excepcional. Garajes y locales comerciales se excluyen siempre.</small></fieldset>
         <fieldset><legend>2 · Tú y tu situación</legend><div class="grid">
           <label>Tu nombre<input required maxlength="100" name="display_name" value="{_value(form, 'display_name')}"></label>
           <label>Correo <small>Opcional; aún no enviamos emails.</small><input type="email" maxlength="254" name="email" value="{_value(form, 'email')}"></label>
@@ -476,7 +496,10 @@ def _profile_page(
 def _saved_page(state: PageState, telegram_url: str, error: str) -> str:
     assert state.search is not None
     action = f'<a class="primary button" href="{html.escape(telegram_url, quote=True)}">Conectar mi Telegram →</a>' if telegram_url else f'<div class="error">{html.escape(error)}</div><a class="secondary button" href="/">Volver a intentarlo</a>'
-    body = f"""<header><a class="brand" href="/">Se admiten humanos <span>🐾</span></a><span class="badge">Búsqueda guardada</span></header><main class="center"><section class="success"><div class="success-mark">✓</div><p class="eyebrow">Ya sabemos qué buscar</p><h1>Tu búsqueda está lista.</h1><p>Hasta <strong>{state.search.max_rent_eur} €</strong> al mes en Madrid. Ahora conecta Telegram para recibir solamente los anuncios que encajen contigo.</p>{action}<small>El enlace de Telegram caduca en 10 minutos y solo funciona una vez.</small><a href="/">← Revisar o cambiar mis datos</a></section></main>"""
+    budget_text = f"Presupuesto preferido: <strong>{state.search.max_rent_eur} €</strong>"
+    if state.search.urgent and state.search.stretch_max_rent_eur is not None:
+        budget_text += f"; sugerencias urgentes hasta <strong>{state.search.stretch_max_rent_eur} €</strong>"
+    body = f"""<header><a class="brand" href="/">Se admiten humanos <span>🐾</span></a><span class="badge">Búsqueda guardada</span></header><main class="center"><section class="success"><div class="success-mark">✓</div><p class="eyebrow">Ya sabemos qué buscar</p><h1>Tu búsqueda está lista.</h1><p>{budget_text} al mes en Madrid. Ahora conecta Telegram para recibir solamente los anuncios que encajen contigo.</p>{action}<small>El enlace de Telegram caduca en 10 minutos y solo funciona una vez.</small><a href="/">← Revisar o cambiar mis datos</a></section></main>"""
     return _layout("Búsqueda guardada · Se admiten humanos", body)
 
 

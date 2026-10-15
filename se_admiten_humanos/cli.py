@@ -402,7 +402,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 config = IdealistaSearchConfig(
                     center=args.center,
                     distance_meters=args.distance,
-                    max_price_eur=max(profile.max_rent_eur for profile in profiles),
+                    max_price_eur=max(
+                        profile.stretch_max_rent_eur or profile.max_rent_eur
+                        for profile in profiles
+                    ),
                     since_date=args.since_date,
                     max_pages=args.max_pages,
                 )

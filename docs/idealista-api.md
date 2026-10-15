@@ -30,8 +30,9 @@ Import at least one enabled search profile and run:
 python -m se_admiten_humanos run-idealista --database rentals.sqlite3
 ```
 
-The adapter derives the API maximum price from the highest enabled search budget, then applies each
-user's exact profile independently in the shared processing pipeline. It queries the official
+The adapter derives the API maximum price from the highest enabled search ceiling, including an
+explicit exceptional ceiling selected by a user in urgent mode. The shared processing pipeline then
+applies each user's preferred budget and absolute ceiling independently. It queries the official
 `homes` category when any enabled search requests a full home and `bedrooms` when any search requests
 a room. Garages and commercial units are never requested. Studios and listings whose bedroom count
 is absent are not removed at acquisition time.

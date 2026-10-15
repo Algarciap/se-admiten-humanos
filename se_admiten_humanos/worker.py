@@ -182,7 +182,10 @@ def _idealista_source(
         config = IdealistaSearchConfig(
             center=environment.get("IDEALISTA_CENTER", MADRID_CENTER).strip(),
             distance_meters=distance,
-            max_price_eur=max(profile.max_rent_eur for profile in profiles),
+            max_price_eur=max(
+                profile.stretch_max_rent_eur or profile.max_rent_eur
+                for profile in profiles
+            ),
             since_date=environment.get("IDEALISTA_SINCE_DATE", "T").strip(),
             max_pages=max_pages,
             property_types=api_property_types,

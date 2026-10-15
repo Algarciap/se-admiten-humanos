@@ -5,6 +5,7 @@ from __future__ import annotations
 import unicodedata
 from dataclasses import dataclass
 from datetime import date
+from enum import Enum
 
 from .models import Listing, PetDecision, PetStatus, PropertyType, RentalDuration
 
@@ -17,6 +18,13 @@ def _normalize_place(value: str) -> str:
     return " ".join(without_accents.casefold().split())
 
 
+class MatchTier(str, Enum):
+    """Why an eligible listing is being offered to the user."""
+
+    EXACT = "exact"
+    BUDGET_STRETCH = "budget_stretch"
+
+
 @dataclass(frozen=True, slots=True)
 class SearchProfile:
     """User-owned hard filters and preferences for one reusable search."""
@@ -26,6 +34,8 @@ class SearchProfile:
     name: str
     max_rent_eur: int
     municipality: str
+    urgent: bool = False
+    stretch_max_rent_eur: int | None = None
     renter_profile_id: str | None = None
     acceptable_districts: tuple[str, ...] = ()
     accepted_property_types: tuple[PropertyType, ...] = (PropertyType.HOME,)
@@ -51,6 +61,13 @@ class SearchProfile:
                 raise ValueError(f"{field_name} cannot be empty")
         if self.max_rent_eur <= 0:
             raise ValueError("Maximum rent must be greater than zero")
+        if self.stretch_max_rent_eur is not None:
+            if not self.urgent:
+                raise ValueError("A stretch budget requires urgent search mode")
+            if self.stretch_max_rent_eur <= self.max_rent_eur:
+                raise ValueError(
+                    "Stretch maximum rent must be greater than the preferred maximum"
+                )
         if self.preferred_min_bedrooms < 0:
             raise ValueError("Preferred bedroom count cannot be negative")
         if not self.accepted_rental_durations:
@@ -78,6 +95,7 @@ class SearchDecision:
     """Explain why a normalized listing is or is not eligible."""
 
     eligible: bool
+    match_tier: MatchTier
     rejection_reasons: tuple[str, ...]
     preference_notes: tuple[str, ...]
 
@@ -98,10 +116,19 @@ def evaluate_listing(
     if listing.property_type not in profile.accepted_property_types:
         rejections.append("property_type_mismatch")
 
+    budget_ceiling = (
+        profile.stretch_max_rent_eur
+        if profile.urgent and profile.stretch_max_rent_eur is not None
+        else profile.max_rent_eur
+    )
+    match_tier = MatchTier.EXACT
     if listing.price_eur is None:
         rejections.append("rent_not_disclosed")
-    elif listing.price_eur > profile.max_rent_eur:
+    elif listing.price_eur > budget_ceiling:
         rejections.append("rent_above_maximum")
+    elif listing.price_eur > profile.max_rent_eur:
+        match_tier = MatchTier.BUDGET_STRETCH
+        notes.append("budget_stretch")
 
     expected_municipality = _normalize_place(profile.municipality)
     actual_municipality = _normalize_place(listing.municipality)
@@ -163,6 +190,7 @@ def evaluate_listing(
 
     return SearchDecision(
         eligible=not rejections,
+        match_tier=match_tier,
         rejection_reasons=tuple(rejections),
         preference_notes=tuple(notes),
     )

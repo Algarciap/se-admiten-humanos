@@ -54,7 +54,11 @@ class DefaultSourceTests(unittest.TestCase):
         )
 
     def test_idealista_credentials_enable_only_requested_api_categories(self):
-        profile = Mock(max_rent_eur=700, accepted_property_types=())
+        profile = Mock(
+            max_rent_eur=700,
+            stretch_max_rent_eur=None,
+            accepted_property_types=(),
+        )
         from se_admiten_humanos.models import PropertyType
 
         profile.accepted_property_types = (PropertyType.ROOM,)
@@ -68,11 +72,34 @@ class DefaultSourceTests(unittest.TestCase):
         self.assertEqual(source.config.max_price_eur, 700)
         self.assertEqual(source.config.property_types, ("bedrooms",))
 
+    def test_idealista_acquisition_uses_the_highest_exceptional_ceiling(self):
+        from se_admiten_humanos.models import PropertyType
+
+        profile = Mock(
+            max_rent_eur=700,
+            stretch_max_rent_eur=760,
+            accepted_property_types=(PropertyType.HOME,),
+        )
+
+        source = _idealista_source(
+            {"IDEALISTA_API_KEY": "key", "IDEALISTA_API_SECRET": "secret"},
+            (profile,),
+            Mock(),
+        )
+
+        self.assertEqual(source.config.max_price_eur, 760)
+
     def test_partial_idealista_credentials_fail_visibly(self):
         with self.assertRaisesRegex(WorkerConfigurationError, "configured together"):
             _idealista_source(
                 {"IDEALISTA_API_KEY": "key"},
-                (Mock(max_rent_eur=950, accepted_property_types=()),),
+                (
+                    Mock(
+                        max_rent_eur=950,
+                        stretch_max_rent_eur=None,
+                        accepted_property_types=(),
+                    ),
+                ),
             )
 
 

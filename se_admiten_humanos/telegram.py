@@ -14,6 +14,7 @@ from urllib.request import Request, urlopen
 from .models import Listing, PetDecision, PetStatus, PropertyType, RentalDuration
 from .persistence import RentalStore
 from .pipeline import ProcessingResult, ProfileMatchOutcome
+from .search_profile import MatchTier
 
 
 _TOKEN = re.compile(r"^[0-9]+:[A-Za-z0-9_-]+$")
@@ -70,7 +71,17 @@ def format_alert(
         )
     if listing.area_sqm is not None:
         facts.append(f"{listing.area_sqm} m²")
-    lines = [f"🏠 {listing.title or 'Nueva vivienda'}"]
+    if outcome.decision.match_tier is MatchTier.BUDGET_STRETCH:
+        difference = (listing.price_eur or 0) - outcome.profile.max_rent_eur
+        lines = [
+            f"🟡 Sugerencia urgente: {difference} € sobre tu presupuesto preferido",
+            f"🏠 {listing.title or 'Nueva vivienda'}",
+        ]
+    else:
+        lines = [
+            "🟢 Dentro de tu presupuesto",
+            f"🏠 {listing.title or 'Nueva vivienda'}",
+        ]
     compact_facts = " · ".join(value for value in facts if value)
     if compact_facts:
         lines.extend((compact_facts, ""))

@@ -51,7 +51,8 @@ The project deliberately separates discovery, classification, notification, and 
 ## Web onboarding
 
 The Railway service now hosts a Spanish onboarding page as well as the background watcher. A person
-can enter their own rent ceiling, Madrid districts, bedroom flexibility, furnishing preference,
+can enter their own preferred rent budget, an optional absolute ceiling for urgent suggestions,
+Madrid districts, bedroom flexibility, furnishing preference,
 rental duration (long-term, temporary, or both),
 move-in needs, employment details, and animals. The form writes a user-owned renter and search
 profile directly to the same SQLite database used by matching, then creates a ten-minute Telegram
@@ -87,6 +88,8 @@ personal WhatsApp accounts, or send messages through unsupported portal APIs.
 - Explainable Spanish/English pet-policy classifier.
 - Configurable Spanish outreach-message generator.
 - Multi-user renter and search profiles with structured pets and independent preferences.
+- Opt-in urgent searches that clearly label listings above the preferred budget and never exceed
+  the user's explicit exceptional ceiling.
 - SQLite schema migrations, shared listing history, per-profile matches, and notification claims.
 - End-to-end listing pipeline that classifies once and evaluates every enabled search independently.
 - Auditable acquisition runner with strict normalized-JSON input, per-source execution locks, hard
@@ -214,8 +217,18 @@ This is the service layer the future website form will call; the public form and
 the next milestone, not part of this background worker.
 
 Every alert labels the pet policy, shows the matching phrase (or clearly says it was not mentioned),
-and includes an **Abrir anuncio** button. A delivery is claimed immediately before the API call,
+distinguishes an ordinary match from an urgent over-budget suggestion, and includes an **Abrir
+anuncio** button. A delivery is claimed immediately before the API call,
 marked `sent` only after Telegram confirms it, and marked `failed` on errors so a later run can retry.
+
+## Roadmap
+
+- Add opt-in nearby-area suggestions for urgent searches, based on public-transport travel time
+  rather than a simple radius. The result must explain why the alternative area was suggested and
+  must still obey every hard filter and the user's absolute budget ceiling.
+- Package an Android APK as a thin mobile client for profile editing, alert history, and notification
+  preferences. Discovery, classification, matching, and deduplication will remain in the shared
+  backend so the website, Telegram bot, and mobile app cannot disagree.
 
 Once `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are present in the process environment, verify the
 connection without processing a listing:

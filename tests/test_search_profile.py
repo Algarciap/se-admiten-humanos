@@ -4,7 +4,7 @@ import unittest
 
 from se_admiten_humanos.models import Listing, PropertyType, RentalDuration
 from se_admiten_humanos.pet_policy import classify
-from se_admiten_humanos.search_profile import SearchProfile, evaluate_listing
+from se_admiten_humanos.search_profile import MatchTier, SearchProfile, evaluate_listing
 
 
 class SearchProfileTests(unittest.TestCase):
@@ -104,6 +104,84 @@ class SearchProfileTests(unittest.TestCase):
                 "pets_rejected",
             },
         )
+
+    def test_urgent_search_labels_a_listing_inside_the_exceptional_ceiling(self) -> None:
+        profile = SearchProfile(
+            id="urgent-search",
+            user_id="user-1",
+            name="Madrid urgente",
+            max_rent_eur=500,
+            municipality="Madrid",
+            urgent=True,
+            stretch_max_rent_eur=550,
+        )
+
+        decision = evaluate_listing(
+            Listing(price_eur=520, municipality="Madrid", bedrooms=1),
+            classify(""),
+            profile,
+        )
+
+        self.assertTrue(decision.eligible)
+        self.assertIs(decision.match_tier, MatchTier.BUDGET_STRETCH)
+        self.assertIn("budget_stretch", decision.preference_notes)
+
+    def test_exceptional_ceiling_is_absolute(self) -> None:
+        profile = SearchProfile(
+            id="urgent-search",
+            user_id="user-1",
+            name="Madrid urgente",
+            max_rent_eur=500,
+            municipality="Madrid",
+            urgent=True,
+            stretch_max_rent_eur=550,
+        )
+
+        decision = evaluate_listing(
+            Listing(price_eur=551, municipality="Madrid", bedrooms=1),
+            classify(""),
+            profile,
+        )
+
+        self.assertFalse(decision.eligible)
+        self.assertIn("rent_above_maximum", decision.rejection_reasons)
+
+    def test_non_urgent_search_never_stretches_the_budget(self) -> None:
+        decision = evaluate_listing(
+            Listing(price_eur=520, municipality="Madrid", bedrooms=1),
+            classify(""),
+            SearchProfile(
+                id="strict-search",
+                user_id="user-1",
+                name="Madrid estricta",
+                max_rent_eur=500,
+                municipality="Madrid",
+            ),
+        )
+
+        self.assertFalse(decision.eligible)
+        self.assertIs(decision.match_tier, MatchTier.EXACT)
+
+    def test_stretch_budget_requires_urgent_mode_and_a_higher_ceiling(self) -> None:
+        with self.assertRaisesRegex(ValueError, "requires urgent"):
+            SearchProfile(
+                id="invalid-stretch",
+                user_id="user-1",
+                name="Invalid",
+                max_rent_eur=500,
+                municipality="Madrid",
+                stretch_max_rent_eur=550,
+            )
+        with self.assertRaisesRegex(ValueError, "greater than the preferred"):
+            SearchProfile(
+                id="invalid-ceiling",
+                user_id="user-1",
+                name="Invalid",
+                max_rent_eur=500,
+                municipality="Madrid",
+                urgent=True,
+                stretch_max_rent_eur=500,
+            )
 
     def test_missing_rent_or_municipality_fails_closed(self) -> None:
         decision = evaluate_listing(Listing(), classify(""), self.profile)

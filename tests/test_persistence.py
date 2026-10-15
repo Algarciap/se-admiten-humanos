@@ -249,6 +249,8 @@ class PersistenceTests(unittest.TestCase):
             name="Selected districts",
             max_rent_eur=1400,
             municipality="Madrid",
+            urgent=True,
+            stretch_max_rent_eur=1500,
             acceptable_districts=("Centro", "Chamberí"),
             preferred_min_bedrooms=2,
             allow_studios=False,
@@ -369,7 +371,7 @@ class PersistenceTests(unittest.TestCase):
                 "select count(*) from legacy_notifications_v1"
             ).fetchone()[0]
 
-            self.assertEqual(version, 9)
+            self.assertEqual(version, 10)
         self.assertEqual(listing_count, 1)
         self.assertEqual(legacy_count, 1)
 

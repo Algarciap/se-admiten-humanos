@@ -124,6 +124,12 @@ def _search_profile(payload: Any) -> SearchProfile:
         name=str(values["name"]),
         max_rent_eur=int(values["max_rent_eur"]),
         municipality=str(values["municipality"]),
+        urgent=_boolean(values, "urgent", False),
+        stretch_max_rent_eur=(
+            int(values["stretch_max_rent_eur"])
+            if values.get("stretch_max_rent_eur") is not None
+            else None
+        ),
         renter_profile_id=(
             str(values["renter_profile_id"])
             if values.get("renter_profile_id") is not None

@@ -32,6 +32,8 @@
       "renter_profile_id": "renter-example",
       "name": "My search",
       "max_rent_eur": 1000,
+      "urgent": false,
+      "stretch_max_rent_eur": null,
       "municipality": "Madrid",
       "acceptable_districts": [],
       "accepted_property_types": ["home"],

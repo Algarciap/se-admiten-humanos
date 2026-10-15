@@ -64,6 +64,31 @@ class TelegramTests(unittest.TestCase):
         )
         self.assertIn("Mascotas: no especificado", alert)
         self.assertIn("el anuncio no menciona mascotas", alert)
+        self.assertIn("🟢 Dentro de tu presupuesto", alert)
+
+    def test_urgent_budget_suggestion_is_clearly_labelled(self) -> None:
+        self.store.save_search_profile(
+            SearchProfile(
+                id="search-urgent",
+                user_id="user-1",
+                name="Madrid urgente",
+                max_rent_eur=850,
+                municipality="Madrid",
+                urgent=True,
+                stretch_max_rent_eur=925,
+            )
+        )
+        result = ListingPipeline(self.store).process(self.listing)
+        urgent_outcome = next(
+            outcome
+            for outcome in result.delivery_candidates
+            if outcome.profile.id == "search-urgent"
+        )
+
+        alert = format_alert(self.listing, result.pet_decision, urgent_outcome)
+
+        self.assertIn("🟡 Sugerencia urgente", alert)
+        self.assertIn("50 € sobre tu presupuesto preferido", alert)
 
     @patch("se_admiten_humanos.telegram.urlopen")
     def test_client_posts_actionable_message(self, mocked_urlopen: Mock) -> None:

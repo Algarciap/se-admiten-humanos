@@ -63,6 +63,8 @@ class WebTests(unittest.TestCase):
             "renter_name": "Ana",
             "sender_name": "Ana",
             "max_rent_eur": "1100",
+            "urgent": "on",
+            "stretch_max_rent_eur": "1200",
             "preferred_min_bedrooms": "1",
             "property_type_home": "on",
             "allow_studios": "on",
@@ -98,6 +100,8 @@ class WebTests(unittest.TestCase):
             profiles = store.load_enabled_search_profiles()
             self.assertEqual(len(profiles), 1)
             self.assertEqual(profiles[0].max_rent_eur, 1100)
+            self.assertTrue(profiles[0].urgent)
+            self.assertEqual(profiles[0].stretch_max_rent_eur, 1200)
             self.assertEqual(profiles[0].accepted_property_types[0].value, "home")
             self.assertEqual(profiles[0].acceptable_districts, ("Centro", "Chamberí"))
             self.assertTrue(profiles[0].requires_pet_acceptance)
@@ -139,6 +143,19 @@ class WebTests(unittest.TestCase):
         with RentalStore(self.database) as store:
             user_count = store.connection.execute("select count(*) from users").fetchone()[0]
             self.assertEqual(user_count, 0)
+
+    def test_exceptional_ceiling_must_exceed_preferred_budget(self):
+        _, headers, _ = self.request()
+        csrf = self.response_cookies(headers)["humanos_csrf"]
+        form = self.valid_form(csrf)
+        form["stretch_max_rent_eur"] = "1100"
+
+        status, _, page = self.request(
+            "POST", "/profile", form, f"humanos_csrf={csrf}"
+        )
+
+        self.assertEqual(status, "422 Unprocessable Entity")
+        self.assertIn("mayor que tu presupuesto preferido", page)
 
     def test_health_endpoint_is_machine_readable(self):
         status, headers, body = self.request(path="/health")
