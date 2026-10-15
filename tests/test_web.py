@@ -164,6 +164,16 @@ class WebTests(unittest.TestCase):
         self.assertEqual(body, '{"status": "ok"}')
         self.assertIn(("Content-Type", "application/json; charset=utf-8"), headers)
 
+    def test_search_options_are_grouped_in_compact_sections(self):
+        status, _, page = self.request()
+
+        self.assertEqual(status, "200 OK")
+        self.assertIn('class="option-groups"', page)
+        self.assertIn("<h3>Urgencia</h3>", page)
+        self.assertIn("<h3>Tipo</h3>", page)
+        self.assertIn("<h3>Flexibilidad</h3>", page)
+        self.assertNotIn('class="checks"', page)
+
 
 if __name__ == "__main__":
     unittest.main()
