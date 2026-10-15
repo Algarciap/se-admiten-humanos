@@ -237,9 +237,9 @@ class WebTests(unittest.TestCase):
         self.assertIn('class="form-progress"', page)
         self.assertIn('class="district-picker"', page)
         self.assertIn('name="household_size"', page)
-        self.assertIn(".wizard-step{padding:32px 0 36px}", page)
+        self.assertIn(".wizard-step{padding:0 0 36px;margin-top:12px}", page)
         self.assertIn(
-            ".wizard-step legend{margin-bottom:18px}", page
+            ".wizard-step legend{margin-bottom:12px}", page
         )
         self.assertIn("legend+.grid{clear:both}", page)
         self.assertIn("input[type=date]{min-width:0;max-width:100%}", page)
