@@ -16,7 +16,7 @@ from .models import Listing, PetDecision, RenterProfile, User, WebsiteDiscovery
 from .search_profile import SearchDecision, SearchProfile
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 _TELEGRAM_CHAT_ID = re.compile(r"-?[1-9][0-9]*")
 
@@ -190,20 +190,27 @@ class RentalStore:
             self._migrate_v2_to_v3()
             self._migrate_v3_to_v4()
             self._migrate_v4_to_v5()
+            self._migrate_v5_to_v6()
         elif version == 1:
             self._migrate_v1_to_v2()
             self._migrate_v2_to_v3()
             self._migrate_v3_to_v4()
             self._migrate_v4_to_v5()
+            self._migrate_v5_to_v6()
         elif version == 2:
             self._migrate_v2_to_v3()
             self._migrate_v3_to_v4()
             self._migrate_v4_to_v5()
+            self._migrate_v5_to_v6()
         elif version == 3:
             self._migrate_v3_to_v4()
             self._migrate_v4_to_v5()
+            self._migrate_v5_to_v6()
         elif version == 4:
             self._migrate_v4_to_v5()
+            self._migrate_v5_to_v6()
+        elif version == 5:
+            self._migrate_v5_to_v6()
         elif version != SCHEMA_VERSION:
             raise RuntimeError(
                 f"Unsupported database schema version {version}; expected {SCHEMA_VERSION}"
@@ -402,6 +409,31 @@ class RentalStore:
             );
 
             pragma user_version = 5;
+            """
+        )
+        self.connection.commit()
+
+    def _migrate_v5_to_v6(self) -> None:
+        self.connection.executescript(
+            """
+            create table if not exists telegram_link_tokens (
+                token_hash text primary key,
+                user_id text not null references users(id) on delete cascade,
+                expires_at text not null,
+                used_at text,
+                created_at text not null
+            );
+
+            create index if not exists telegram_link_tokens_user_idx
+                on telegram_link_tokens(user_id, created_at desc);
+
+            create table if not exists telegram_bot_state (
+                id integer primary key check (id = 1),
+                next_update_id integer not null check (next_update_id >= 0),
+                updated_at text not null
+            );
+
+            pragma user_version = 6;
             """
         )
         self.connection.commit()
@@ -783,6 +815,125 @@ class RentalStore:
             """
         ).fetchall()
         return {str(row[0]): str(row[1]) for row in rows}
+
+    def save_telegram_link_token(
+        self,
+        user_id: str,
+        token_hash: str,
+        expires_at: datetime,
+    ) -> None:
+        """Store one hashed, single-use Telegram linking capability."""
+
+        normalized_user_id = user_id.strip()
+        normalized_hash = token_hash.strip().casefold()
+        if not re.fullmatch(r"[0-9a-f]{64}", normalized_hash):
+            raise ValueError("Telegram link token hash must be SHA-256")
+        self._require_user(normalized_user_id)
+        if expires_at.tzinfo is None:
+            raise ValueError("Telegram link expiry must include a timezone")
+        now = _utc_now()
+        expiry = expires_at.astimezone(UTC).isoformat()
+        if expiry <= now:
+            raise ValueError("Telegram link expiry must be in the future")
+        with self.connection:
+            self.connection.execute(
+                "delete from telegram_link_tokens where user_id = ? and used_at is null",
+                (normalized_user_id,),
+            )
+            self.connection.execute(
+                """
+                insert into telegram_link_tokens (
+                    token_hash, user_id, expires_at, used_at, created_at
+                ) values (?, ?, ?, null, ?)
+                """,
+                (normalized_hash, normalized_user_id, expiry, now),
+            )
+
+    def consume_telegram_link_token(
+        self,
+        token_hash: str,
+        chat_id: str,
+        *,
+        now: datetime | None = None,
+    ) -> str:
+        """Atomically consume a valid token and bind its user to a private chat."""
+
+        normalized_hash = token_hash.strip().casefold()
+        normalized_chat_id = chat_id.strip()
+        if not re.fullmatch(r"[0-9a-f]{64}", normalized_hash):
+            raise ValueError("Invalid or expired Telegram link")
+        if not _TELEGRAM_CHAT_ID.fullmatch(normalized_chat_id):
+            raise ValueError("Telegram chat id must be numeric")
+        current = datetime.now(UTC) if now is None else now
+        if current.tzinfo is None:
+            raise ValueError("Telegram link consumption time must include a timezone")
+        timestamp = current.astimezone(UTC).isoformat()
+        try:
+            with self.connection:
+                row = self.connection.execute(
+                    """
+                    select user_id
+                    from telegram_link_tokens
+                    where token_hash = ? and used_at is null and expires_at > ?
+                    """,
+                    (normalized_hash, timestamp),
+                ).fetchone()
+                if row is None:
+                    raise ValueError("Invalid or expired Telegram link")
+                user_id = str(row[0])
+                self.connection.execute(
+                    """
+                    insert into telegram_destinations (
+                        user_id, chat_id, enabled, created_at, updated_at
+                    ) values (?, ?, 1, ?, ?)
+                    on conflict(user_id) do update set
+                        chat_id = excluded.chat_id,
+                        enabled = 1,
+                        updated_at = excluded.updated_at
+                    """,
+                    (user_id, normalized_chat_id, timestamp, timestamp),
+                )
+                updated = self.connection.execute(
+                    """
+                    update telegram_link_tokens
+                    set used_at = ?
+                    where token_hash = ? and used_at is null and expires_at > ?
+                    """,
+                    (timestamp, normalized_hash, timestamp),
+                ).rowcount
+                if updated != 1:
+                    raise ValueError("Invalid or expired Telegram link")
+        except sqlite3.IntegrityError as error:
+            raise ValueError(
+                "Telegram chat is already linked to a different user"
+            ) from error
+        return user_id
+
+    def telegram_next_update_id(self) -> int:
+        """Return the next Bot API update id, or zero before the first poll."""
+
+        row = self.connection.execute(
+            "select next_update_id from telegram_bot_state where id = 1"
+        ).fetchone()
+        return int(row[0]) if row is not None else 0
+
+    def save_telegram_next_update_id(self, next_update_id: int) -> None:
+        """Advance the durable Bot API cursor without ever moving it backwards."""
+
+        if next_update_id < 0:
+            raise ValueError("Telegram update id cannot be negative")
+        now = _utc_now()
+        with self.connection:
+            self.connection.execute(
+                """
+                insert into telegram_bot_state (id, next_update_id, updated_at)
+                values (1, ?, ?)
+                on conflict(id) do update set
+                    next_update_id = max(next_update_id, excluded.next_update_id),
+                    updated_at = excluded.updated_at
+                """,
+                (next_update_id, now),
+            )
 
     def save_renter_profile(self, profile: RenterProfile) -> None:
         """Create or update private renter details and structured pets."""

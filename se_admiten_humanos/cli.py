@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import sys
+from datetime import timedelta
 from pathlib import Path
 from typing import Sequence
 
@@ -31,6 +32,7 @@ from .telegram import (
     TelegramDeliveryError,
     notifier_from_environment,
 )
+from .telegram_linking import create_telegram_link
 from .website_watcher import WebsiteWatcherAdapter
 from .worker import WorkerConfigurationError, WorkerSettings, run_worker
 
@@ -120,6 +122,32 @@ def _build_parser() -> argparse.ArgumentParser:
         help="send a test alert using TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID",
     )
     telegram_parser.add_argument(
+        "--env-file",
+        default=".env",
+        help="environment file to load when present (default: .env)",
+    )
+    link_parser = subparsers.add_parser(
+        "create-telegram-link",
+        help="create a short-lived, single-use Telegram account link",
+    )
+    link_parser.add_argument("--user-id", required=True, help="application user id")
+    link_parser.add_argument(
+        "--bot-username",
+        default="",
+        help="Telegram bot username (or set TELEGRAM_BOT_USERNAME)",
+    )
+    link_parser.add_argument(
+        "--ttl-minutes",
+        type=int,
+        default=10,
+        help="link lifetime in minutes (default: 10; maximum: 1440)",
+    )
+    link_parser.add_argument(
+        "--database",
+        default="rentals.sqlite3",
+        help="SQLite database path (default: rentals.sqlite3)",
+    )
+    link_parser.add_argument(
         "--env-file",
         default=".env",
         help="environment file to load when present (default: .env)",
@@ -289,6 +317,34 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"Telegram test failed: {error}", file=sys.stderr)
             return 1
         print(f"Telegram test message sent (message id {message_id}).")
+        return 0
+    if args.command == "create-telegram-link":
+        try:
+            _load_environment_file(args.env_file)
+            bot_username = args.bot_username or os.environ.get(
+                "TELEGRAM_BOT_USERNAME", ""
+            )
+            with RentalStore(args.database) as store:
+                link = create_telegram_link(
+                    store,
+                    args.user_id,
+                    bot_username,
+                    ttl=timedelta(minutes=args.ttl_minutes),
+                )
+        except (ValueError, OSError) as error:
+            print(f"Telegram link could not be created: {error}", file=sys.stderr)
+            return 2
+        print(
+            json.dumps(
+                {
+                    "user_id": link.user_id,
+                    "url": link.url,
+                    "expires_at": link.expires_at.isoformat(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
         return 0
     if args.command == "run-json-source":
         try:

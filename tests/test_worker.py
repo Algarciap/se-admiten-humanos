@@ -3,10 +3,12 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from se_admiten_humanos.models import Listing, WebsiteDiscovery
 from se_admiten_humanos.persistence import RentalStore
 from se_admiten_humanos.telegram import DeliveryAttempt
+from se_admiten_humanos.telegram_linking import TelegramLinkPollResult
 from se_admiten_humanos.worker import (
     WorkerConfigurationError,
     WorkerCycleResult,
@@ -155,6 +157,40 @@ class WorkerTests(unittest.TestCase):
             run_worker_cycle(self.settings, {}, source=self.source)
 
         self.assertEqual(self.source.discovery_calls, 0)
+
+    @patch("se_admiten_humanos.worker.process_telegram_link_updates")
+    def test_bot_username_enables_account_link_polling(self, mocked_poll):
+        mocked_poll.return_value = TelegramLinkPollResult(
+            updates_seen=1,
+            links_created=1,
+        )
+        environment = dict(
+            self.environment,
+            TELEGRAM_BOT_TOKEN="123456:test_token",
+            TELEGRAM_BOT_USERNAME="SeAdmitenHumanosBot",
+        )
+
+        result = run_worker_cycle(self.settings, environment, source=self.source)
+
+        self.assertEqual(result.telegram_linking.links_created, 1)
+        mocked_poll.assert_called_once()
+
+    @patch("se_admiten_humanos.worker.process_telegram_link_updates")
+    def test_link_poll_failure_is_visible_without_blocking_property_scan(
+        self, mocked_poll
+    ):
+        mocked_poll.side_effect = OSError("temporary Telegram outage")
+        environment = dict(
+            self.environment,
+            TELEGRAM_BOT_TOKEN="123456:test_token",
+            TELEGRAM_BOT_USERNAME="SeAdmitenHumanosBot",
+        )
+
+        result = run_worker_cycle(self.settings, environment, source=self.source)
+
+        self.assertEqual(result.status, "baseline_created")
+        self.assertIn("OSError", result.telegram_linking_error)
+        self.assertEqual(self.source.discovery_calls, 1)
 
     def test_failed_delivery_makes_worker_cycle_visibly_unhealthy(self):
         run_worker_cycle(self.settings, self.environment, source=self.source)

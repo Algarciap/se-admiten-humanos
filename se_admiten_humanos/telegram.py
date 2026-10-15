@@ -90,8 +90,32 @@ class TelegramBotClient:
             payload["reply_markup"] = {
                 "inline_keyboard": [[{"text": "Abrir anuncio", "url": safe_url}]]
             }
+        result = self._request("sendMessage", payload)
+        return int(result["message_id"])
+
+    def get_updates(self, offset: int, *, limit: int = 100) -> tuple[dict[str, object], ...]:
+        """Fetch message updates from a durable offset without long polling."""
+
+        if offset < 0:
+            raise ValueError("Telegram update offset cannot be negative")
+        if not 1 <= limit <= 100:
+            raise ValueError("Telegram update limit must be between 1 and 100")
+        result = self._request(
+            "getUpdates",
+            {
+                "offset": offset,
+                "limit": limit,
+                "timeout": 0,
+                "allowed_updates": ["message"],
+            },
+        )
+        if not isinstance(result, list) or not all(isinstance(item, dict) for item in result):
+            raise TelegramDeliveryError("Telegram returned malformed updates")
+        return tuple(result)
+
+    def _request(self, method: str, payload: Mapping[str, object]) -> object:
         request = Request(
-            f"https://api.telegram.org/bot{self._token}/sendMessage",
+            f"https://api.telegram.org/bot{self._token}/{method}",
             data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="POST",
@@ -104,7 +128,9 @@ class TelegramBotClient:
         if result.get("ok") is not True:
             description = str(result.get("description", "unknown Telegram error"))
             raise TelegramDeliveryError(description[:500])
-        return int(result["result"]["message_id"])
+        if "result" not in result:
+            raise TelegramDeliveryError("Telegram response omitted its result")
+        return result["result"]
 
 
 class TelegramNotifier:

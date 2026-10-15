@@ -15,7 +15,8 @@ from .acquisition import AcquisitionResult, AcquisitionRunner, Notifier
 from .alquiler_seguro import AlquilerSeguroSource
 from .persistence import RentalStore
 from .profile_config import ProfileBundle, load_profile_bundle_json
-from .telegram import notifier_from_environment
+from .telegram import TelegramBotClient, notifier_from_environment
+from .telegram_linking import TelegramLinkPollResult, process_telegram_link_updates
 from .website_watcher import WebsiteSource, WebsiteWatcherAdapter
 
 
@@ -92,6 +93,8 @@ class WorkerCycleResult:
     status: str
     profiles_imported: int = 0
     discoveries_recorded: int = 0
+    telegram_linking: TelegramLinkPollResult | None = None
+    telegram_linking_error: str = ""
     acquisition: AcquisitionResult | None = None
 
     def to_dict(self) -> dict[str, object]:
@@ -99,6 +102,27 @@ class WorkerCycleResult:
         if self.acquisition is not None:
             values["acquisition"] = self.acquisition.to_dict()
         return values
+
+
+def _poll_telegram_links(
+    store: RentalStore,
+    environment: Mapping[str, str],
+) -> tuple[TelegramLinkPollResult | None, str]:
+    """Poll when a bot username opts the deployment into account linking."""
+
+    if not environment.get("TELEGRAM_BOT_USERNAME", "").strip():
+        return None, ""
+    token = environment.get("TELEGRAM_BOT_TOKEN", "").strip()
+    if not token:
+        raise WorkerConfigurationError(
+            "TELEGRAM_BOT_TOKEN is required when TELEGRAM_BOT_USERNAME is configured"
+        )
+    try:
+        return process_telegram_link_updates(store, TelegramBotClient(token)), ""
+    except ValueError as error:
+        raise WorkerConfigurationError(str(error)) from error
+    except Exception as error:
+        return None, f"{type(error).__name__}: {error}"[:500]
 
 
 def _save_bundle(store: RentalStore, bundle: ProfileBundle) -> None:
@@ -145,6 +169,9 @@ def run_worker_cycle(
     website_source = AlquilerSeguroSource() if source is None else source
     with RentalStore(settings.database_path) as store:
         profiles_imported = _ensure_profiles(store, environment)
+        telegram_linking, telegram_linking_error = _poll_telegram_links(
+            store, environment
+        )
         adapter = WebsiteWatcherAdapter(store, website_source)
         if not store.website_source_initialized(adapter.source_id):
             baseline = adapter.initialize_baseline()
@@ -153,6 +180,8 @@ def run_worker_cycle(
                 status="baseline_created",
                 profiles_imported=profiles_imported,
                 discoveries_recorded=baseline.discoveries_recorded,
+                telegram_linking=telegram_linking,
+                telegram_linking_error=telegram_linking_error,
             )
         try:
             notifier = notifier_factory(store, environment)
@@ -171,6 +200,8 @@ def run_worker_cycle(
             source_id=adapter.source_id,
             status=acquisition.status,
             profiles_imported=profiles_imported,
+            telegram_linking=telegram_linking,
+            telegram_linking_error=telegram_linking_error,
             acquisition=acquisition,
         )
 

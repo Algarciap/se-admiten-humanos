@@ -165,8 +165,20 @@ different user's match.
 
 `TELEGRAM_USER_ID` and `TELEGRAM_CHAT_ID` remain as a backward-compatible bootstrap for the first
 deployed user. The worker imports that pair into the database only when that user has no destination;
-it never overwrites a database-managed mapping. Public onboarding will replace this bootstrap with a
-single-use Telegram `/start` link written by the authenticated website.
+it never overwrites a database-managed mapping. New users link their own private chat through a
+single-use `/start` URL. The capability expires, is stored only as a SHA-256 digest, cannot be replayed,
+and is accepted only in a private Telegram chat. The worker checkpoints Telegram update IDs in SQLite
+so deploys and restarts do not process the same command twice.
+
+After an authenticated application user exists, generate a ten-minute link with:
+
+```powershell
+python -m se_admiten_humanos create-telegram-link --user-id USER_ID
+```
+
+The command reads `TELEGRAM_BOT_USERNAME` (or accepts `--bot-username`) and prints the deep link once.
+This is the service layer the future website form will call; the public form and authentication UI are
+the next milestone, not part of this background worker.
 
 Every alert labels the pet policy, shows the matching phrase (or clearly says it was not mentioned),
 and includes an **Abrir anuncio** button. A delivery is claimed immediately before the API call,

@@ -80,6 +80,23 @@ class TelegramTests(unittest.TestCase):
         self.assertEqual(payload["chat_id"], "987654")
         self.assertEqual(payload["reply_markup"]["inline_keyboard"][0][0]["url"], self.listing.url)
 
+    @patch("se_admiten_humanos.telegram.urlopen")
+    def test_client_fetches_message_updates_from_requested_offset(
+        self, mocked_urlopen: Mock
+    ) -> None:
+        mocked_urlopen.return_value = _Response(
+            json.dumps({"ok": True, "result": [{"update_id": 42}]}).encode()
+        )
+
+        updates = TelegramBotClient("123456:test_token").get_updates(40)
+
+        self.assertEqual(updates, ({"update_id": 42},))
+        request = mocked_urlopen.call_args.args[0]
+        payload = json.loads(request.data)
+        self.assertEqual(payload["offset"], 40)
+        self.assertEqual(payload["timeout"], 0)
+        self.assertEqual(payload["allowed_updates"], ["message"])
+
     def test_notifier_marks_success_and_avoids_duplicates(self) -> None:
         client = Mock()
         self.store.save_telegram_destination("user-1", "987654")

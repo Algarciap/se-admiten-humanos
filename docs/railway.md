@@ -40,6 +40,7 @@ private.
 | `MAX_LISTINGS_PER_RUN` | `50` |
 | `MAX_CONSECUTIVE_FAILURES` | `3` |
 | `TELEGRAM_BOT_TOKEN` | BotFather token |
+| `TELEGRAM_BOT_USERNAME` | Bot username without `@`; enables secure `/start` link polling |
 | `TELEGRAM_CHAT_ID` | Legacy bootstrap: first user's numeric private chat id |
 | `TELEGRAM_USER_ID` | Legacy bootstrap: first user's application id |
 | `PROFILE_BUNDLE_JSON` | Entire private profile file as one JSON value |
@@ -57,7 +58,9 @@ The first live notification cycle stores the legacy `TELEGRAM_USER_ID`/`TELEGRAM
 SQLite. Later cycles route from the database and will not overwrite that record, even if the Railway
 variables remain configured. Future website onboarding can therefore add, change, disable, or remove
 per-user destinations without sharing one global chat setting. The bot token remains a single sealed
-service secret.
+service secret. When `TELEGRAM_BOT_USERNAME` is set, every worker cycle also consumes private-chat,
+single-use account links and persists the Bot API cursor. A temporary polling error is included in the
+cycle's `telegram_linking_error` field without preventing time-sensitive property acquisition.
 
 ## 3. Understand the first deployment
 
@@ -65,9 +68,10 @@ The first successful worker cycle performs these operations in order:
 
 1. Creates the SQLite schema on the persistent volume.
 2. Imports the private user, renter, pet, and search profile.
-3. Discovers the current Alquiler Seguro inventory.
-4. Records every current listing id as the no-alert baseline.
-5. Writes a `baseline_created` event to the Railway logs and sends zero Telegram messages.
+3. Polls Telegram account-link commands when `TELEGRAM_BOT_USERNAME` is configured.
+4. Discovers the current Alquiler Seguro inventory.
+5. Records every current listing id as the no-alert baseline.
+6. Writes a `baseline_created` event to the Railway logs and sends zero property alerts.
 
 On the next cycle, the worker constructs the Telegram notifier and performs a normal live check.
 That cycle also migrates the first user's legacy environment mapping into the database.
@@ -98,6 +102,7 @@ end-to-end production confirmation.
 - Website, parsing, SQLite, and delivery failures are logged. Three consecutive failed cycles make
   the process exit non-zero, after which Railway's `Always` policy restarts it.
 - A failed Telegram delivery remains retryable and the discovery is not acknowledged as complete.
+- A Telegram account-link polling error is reported separately and does not delay property checks.
 - Parser contract changes fail visibly instead of turning a changed page into a false empty result.
 - Removing or replacing the volume creates a fresh database and therefore a fresh baseline. Treat
   that as a recovery operation, not routine deployment.
