@@ -17,8 +17,8 @@ first-party Madrid inventory:
 | Vivenio | First-party landlord | Direct inventory/contact | Company says it is pet-friendly |
 | Testa Homes | First-party landlord | Pet filter plus direct contact | Explicit `Acepta mascotas` field |
 | Agencia Negociadora del Alquiler | Madrid rental specialist | Agency site plus its portal profile | Confirm per property |
-| Tecnocasa | Large local-office network | Search plus selected district offices | Confirm per property |
-| Redpiso | Large Madrid network | Search plus listing-level contact | Confirm per property |
+| Tecnocasa | Large local-office network | Published compressed property sitemaps plus unseen public details | Confirm per property |
+| Redpiso | Large Madrid network | Published property sitemap plus unseen public details | Confirm per property |
 | Gilmar | Dedicated Madrid rental office | Saved search/direct email | Confirm per property |
 | Engel & Völkers | Hundreds of Madrid rentals | Native saved-search alert | Description |
 
@@ -56,6 +56,10 @@ users, but no Fotocasa alert or parser is enabled.
 
 - Alquiler Seguro publishes a dynamic sitemap of public listing URLs. The implemented watcher uses
   it for discovery, fetches detail pages only for unseen IDs, and treats the daily email as fallback.
+- Tecnocasa publishes compressed property sitemaps. The adapter keeps only residential rentals in
+  Madrid city and reads its server-rendered listing object without calling private API routes.
+- Redpiso publishes a property sitemap and schema.org listing data. The adapter keeps long-term
+  Madrid-region rentals; each user's municipality and budget filters are applied later.
 - Wolo exposes an `Acepta mascotas` filter and states accepted, rejected, or pending pet status in
   individual listings. It also supports direct visit booking, making it a high-priority manual source.
 - Testa Homes exposes an `Acepta mascotas` characteristic in its first-party inventory.

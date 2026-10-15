@@ -15,6 +15,7 @@ from se_admiten_humanos.worker import (
     WorkerSettings,
     run_worker,
     run_worker_cycle,
+    run_worker_sources_cycle,
 )
 
 
@@ -236,6 +237,51 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(exit_code, 1)
         self.assertEqual(calls, 3)
         self.assertEqual(len(sleeps), 2)
+
+    def test_multi_source_cycle_baselines_every_source_without_notifying(self):
+        second = MutableSource(
+            [WebsiteDiscovery("second", "https://example.test/homes/second")]
+        )
+        second.source_id = "second-agency"
+
+        result = run_worker_sources_cycle(
+            self.settings,
+            self.environment,
+            sources=(self.source, second),
+            notifier_factory=lambda *_args: (_ for _ in ()).throw(
+                AssertionError("baseline must not construct the notifier")
+            ),
+        )
+
+        self.assertEqual(result.status, "baseline_created")
+        self.assertEqual(
+            [source.source_id for source in result.sources],
+            ["agency", "second-agency"],
+        )
+        self.assertEqual([source.discoveries_recorded for source in result.sources], [1, 1])
+
+    def test_multi_source_failure_does_not_starve_healthy_source(self):
+        class BrokenSource(MutableSource):
+            source_id = "broken"
+
+            def discover(self):
+                raise ValueError("parser contract changed")
+
+        healthy = MutableSource(
+            [WebsiteDiscovery("healthy", "https://example.test/homes/healthy")]
+        )
+        healthy.source_id = "healthy"
+
+        result = run_worker_sources_cycle(
+            self.settings,
+            self.environment,
+            sources=(BrokenSource([]), healthy),
+        )
+
+        self.assertEqual(result.status, "partial_failure")
+        self.assertIn("parser contract changed", result.source_errors[0])
+        self.assertEqual(result.sources[0].source_id, "healthy")
+        self.assertEqual(healthy.discovery_calls, 1)
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ This is the initial hosted topology for `Se admiten humanos`:
 
 ```text
 Railway combined web + worker service (one replica)
-    ├── polls Alquiler Seguro every 180 seconds
+    ├── polls Alquiler Seguro, Tecnocasa, and Redpiso every 180 seconds
     ├── accepts user-owned search profiles over HTTPS
     ├── sends eligible new listings to Telegram
     └── reads/writes /data/rentals.sqlite3
@@ -72,8 +72,8 @@ The first successful worker cycle performs these operations in order:
 1. Creates the SQLite schema on the persistent volume.
 2. Imports the private user, renter, pet, and search profile.
 3. Polls Telegram account-link commands when `TELEGRAM_BOT_USERNAME` is configured.
-4. Discovers the current Alquiler Seguro inventory.
-5. Records every current listing id as the no-alert baseline.
+4. Discovers current Alquiler Seguro, Tecnocasa, and Redpiso inventory from their published sitemaps.
+5. Records every current listing id as a separate no-alert baseline for each source.
 6. Writes a `baseline_created` event to the Railway logs and sends zero property alerts.
 
 ## Public networking
@@ -97,7 +97,7 @@ is logged with status `empty`; it is a healthy outcome.
 Keep the existing local scheduler active during deployment so there is no monitoring gap. In the
 Railway deployment logs, verify all of the following:
 
-- one `baseline_created` event with a non-zero `discoveries_recorded` value;
+- one `baseline_created` result per enabled source with a non-zero `discoveries_recorded` value;
 - a later `empty` or `succeeded` acquisition event;
 - no `worker_cycle_failed` or configuration error;
 - the same volume remains attached after one manual redeploy;
@@ -113,8 +113,9 @@ end-to-end production confirmation.
 ## Failure behaviour and recovery
 
 - Missing/invalid profile or Telegram settings stop the worker immediately with a sanitized error.
-- Website, parsing, SQLite, and delivery failures are logged. Three consecutive failed cycles make
-  the process exit non-zero, after which Railway's `Always` policy restarts it.
+- Website, parsing, SQLite, and delivery failures are logged. A failed source does not starve the
+  remaining sources in that cycle. Three consecutive partially or fully failed cycles make the
+  process exit non-zero, after which Railway's `Always` policy restarts it.
 - A failed Telegram delivery remains retryable and the discovery is not acknowledged as complete.
 - A Telegram account-link polling error is reported separately and does not delay property checks.
 - Parser contract changes fail visibly instead of turning a changed page into a false empty result.

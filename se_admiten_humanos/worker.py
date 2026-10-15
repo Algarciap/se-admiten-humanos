@@ -15,8 +15,10 @@ from .acquisition import AcquisitionResult, AcquisitionRunner, Notifier
 from .alquiler_seguro import AlquilerSeguroSource
 from .persistence import RentalStore
 from .profile_config import ProfileBundle, load_profile_bundle_json
+from .redpiso import RedpisoSource
 from .telegram import TelegramBotClient, notifier_from_environment
 from .telegram_linking import TelegramLinkPollResult, process_telegram_link_updates
+from .tecnocasa import TecnocasaSource
 from .website_watcher import WebsiteSource, WebsiteWatcherAdapter
 
 
@@ -102,6 +104,38 @@ class WorkerCycleResult:
         if self.acquisition is not None:
             values["acquisition"] = self.acquisition.to_dict()
         return values
+
+
+@dataclass(frozen=True, slots=True)
+class WorkerBatchResult:
+    """One hosted polling cycle across every enabled website source."""
+
+    status: str
+    sources: tuple[WorkerCycleResult, ...]
+    profiles_imported: int = 0
+    telegram_linking: TelegramLinkPollResult | None = None
+    telegram_linking_error: str = ""
+    source_errors: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "status": self.status,
+            "profiles_imported": self.profiles_imported,
+            "telegram_linking": (
+                asdict(self.telegram_linking)
+                if self.telegram_linking is not None
+                else None
+            ),
+            "telegram_linking_error": self.telegram_linking_error,
+            "sources": [source.to_dict() for source in self.sources],
+            "source_errors": list(self.source_errors),
+        }
+
+
+def default_website_sources() -> tuple[WebsiteSource, ...]:
+    """Return enabled first-party sources in a stable operational order."""
+
+    return (AlquilerSeguroSource(), TecnocasaSource(), RedpisoSource())
 
 
 def _poll_telegram_links(
@@ -206,6 +240,90 @@ def run_worker_cycle(
         )
 
 
+def run_worker_sources_cycle(
+    settings: WorkerSettings,
+    environment: Mapping[str, str],
+    *,
+    sources: tuple[WebsiteSource, ...] | None = None,
+    notifier_factory: NotifierFactory = notifier_from_environment,
+) -> WorkerBatchResult:
+    """Run all enabled website sources, isolating one parser failure from the rest."""
+
+    settings.validate()
+    website_sources = default_website_sources() if sources is None else sources
+    if not website_sources:
+        raise WorkerConfigurationError("At least one website source is required")
+    source_ids = [source.source_id.strip().casefold() for source in website_sources]
+    if any(not source_id for source_id in source_ids) or len(source_ids) != len(
+        set(source_ids)
+    ):
+        raise WorkerConfigurationError("Website source ids must be non-empty and unique")
+    with RentalStore(settings.database_path) as store:
+        profiles_imported = _ensure_profiles(store, environment)
+        telegram_linking, telegram_linking_error = _poll_telegram_links(
+            store, environment
+        )
+        results: list[WorkerCycleResult] = []
+        errors: list[str] = []
+        notifier: Notifier | None = None
+        for website_source in website_sources:
+            adapter = WebsiteWatcherAdapter(store, website_source)
+            try:
+                if not store.website_source_initialized(adapter.source_id):
+                    baseline = adapter.initialize_baseline()
+                    results.append(
+                        WorkerCycleResult(
+                            source_id=adapter.source_id,
+                            status="baseline_created",
+                            discoveries_recorded=baseline.discoveries_recorded,
+                        )
+                    )
+                    continue
+                if notifier is None:
+                    try:
+                        notifier = notifier_factory(store, environment)
+                    except ValueError as error:
+                        raise WorkerConfigurationError(str(error)) from error
+                acquisition = AcquisitionRunner(
+                    store,
+                    notifier,
+                    max_listings_per_run=settings.max_listings_per_run,
+                ).run(adapter)
+                if acquisition.status not in {"empty", "succeeded"}:
+                    raise RuntimeError(
+                        f"source finished with unhealthy status {acquisition.status!r}"
+                    )
+                results.append(
+                    WorkerCycleResult(
+                        source_id=adapter.source_id,
+                        status=acquisition.status,
+                        acquisition=acquisition,
+                    )
+                )
+            except WorkerConfigurationError:
+                raise
+            except Exception as error:
+                errors.append(
+                    f"{adapter.source_id}: {type(error).__name__}: {error}"[:1000]
+                )
+        if errors:
+            status = "partial_failure"
+        elif all(result.status == "baseline_created" for result in results):
+            status = "baseline_created"
+        elif all(result.status == "empty" for result in results):
+            status = "empty"
+        else:
+            status = "succeeded"
+        return WorkerBatchResult(
+            status=status,
+            sources=tuple(results),
+            profiles_imported=profiles_imported,
+            telegram_linking=telegram_linking,
+            telegram_linking_error=telegram_linking_error,
+            source_errors=tuple(errors),
+        )
+
+
 def run_worker(
     settings: WorkerSettings,
     environment: Mapping[str, str] | None = None,
@@ -213,8 +331,8 @@ def run_worker(
     max_cycles: int | None = None,
     sleep: Callable[[float], None] = time.sleep,
     cycle: Callable[
-        [WorkerSettings, Mapping[str, str]], WorkerCycleResult
-    ] = run_worker_cycle,
+        [WorkerSettings, Mapping[str, str]], WorkerCycleResult | WorkerBatchResult
+    ] = run_worker_sources_cycle,
 ) -> int:
     """Poll forever, failing after repeated errors so the platform restarts us."""
 
@@ -225,6 +343,16 @@ def run_worker(
         started = time.monotonic()
         try:
             result = cycle(settings, values)
+            if (
+                isinstance(result, WorkerBatchResult)
+                and result.status == "partial_failure"
+            ):
+                print(
+                    json.dumps(result.to_dict(), ensure_ascii=False),
+                    file=sys.stderr,
+                    flush=True,
+                )
+                raise RuntimeError("; ".join(result.source_errors))
         except WorkerConfigurationError:
             raise
         except Exception as error:

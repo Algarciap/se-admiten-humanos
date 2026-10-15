@@ -92,8 +92,9 @@ personal WhatsApp accounts, or send messages through unsupported portal APIs.
   run limits, and explicit `succeeded`, `empty`, and `failed` outcomes.
 - Credential-gated Idealista Search API adapter with OAuth, conservative pagination, strict response
   validation, and automatic maximum-price selection from enabled user searches.
-- Baseline-safe website-watcher framework plus a live Alquiler Seguro adapter that discovers homes
-  through the agency's public sitemap and fetches detail pages only for unseen listing IDs.
+- Baseline-safe, multi-source website watcher with live Alquiler Seguro, Tecnocasa, and Redpiso
+  adapters. Each uses a published sitemap for discovery and fetches detail pages only for unseen
+  listing IDs; one broken parser cannot prevent the other sources from running.
 - Machine-readable registry of portals, agencies, institutional landlords, and public housing sources.
 - Safe direct-email gate: draft by default, allow-listed agency email only for automatic sending.
 - Python regression tests plus source-registry validation.
@@ -101,8 +102,9 @@ personal WhatsApp accounts, or send messages through unsupported portal APIs.
   retries, and an actionable listing button; different budgets route to different private chats.
 - Railway-ready background worker with safe first-boot profile import, no-alert website baseline,
   three-minute polling, persistent SQLite state, and visible repeated-failure exits.
-- Idealista API access and quota confirmation and additional permitted agency adapters remain
-  undeployed. Fotocasa is deliberately excluded from the initial deployment.
+- Idealista API access and quota confirmation remain pending. Wolo remains in the registry but its
+  background parser is disabled until written permission is obtained. Fotocasa is deliberately
+  excluded from the initial deployment.
 
 ## Run locally
 
@@ -157,10 +159,11 @@ credentials. It defaults to one page per run until the account-specific rate and
 known. See [`docs/idealista-api.md`](docs/idealista-api.md) before enabling it; the project does not
 fall back to scraping Idealista pages.
 
-The Alquiler Seguro command uses the site's published dynamic sitemap for lightweight discovery and
-public detail pages only for new IDs. The separate baseline command is mandatory: it records all
-homes already online as processed and sends zero alerts, preventing a first-run flood. Empty or
-structurally changed pages fail visibly. See
+The hosted worker uses published sitemaps for lightweight discovery on Alquiler Seguro, Tecnocasa,
+and Redpiso, then requests public detail pages only for new IDs. Each source receives its own
+no-alert baseline, preventing a first-run flood. Empty or structurally changed pages fail visibly,
+while the other sources still complete their checks. The separate Alquiler Seguro CLI remains useful
+for local diagnostics. See
 [`docs/alquiler-seguro.md`](docs/alquiler-seguro.md) before scheduling it.
 
 ## Run continuously on Railway
@@ -171,10 +174,11 @@ and it does not require a personal computer to remain on. SQLite is appropriate 
 worker, but the service must remain at one replica and the database must live on the mounted volume.
 
 On a brand-new database, the worker imports the private profile from a sealed environment variable
-and creates an Alquiler Seguro baseline. That first cycle sends zero messages. Later cycles process
-only newly discovered listing IDs through the normal classifier, matching, deduplication, and
-Telegram pipeline. Configuration errors stop immediately; transient failures are logged and the
-process exits after three consecutive failures so Railway can restart it visibly.
+and creates independent Alquiler Seguro, Tecnocasa, and Redpiso baselines. That first cycle sends
+zero messages. Later cycles process only newly discovered listing IDs through the normal classifier,
+matching, deduplication, and Telegram pipeline. Configuration errors stop immediately; transient
+failures are logged and the process exits after three consecutive failures so Railway can restart it
+visibly.
 
 See [`docs/railway.md`](docs/railway.md) for the exact volume, variables, deployment, verification,
 and local-scheduler handover procedure. Never commit the Telegram token, chat id, private profile,
