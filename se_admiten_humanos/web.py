@@ -14,7 +14,7 @@ from typing import Callable, Iterable, Mapping
 from urllib.parse import parse_qs
 from uuid import uuid4
 
-from .models import Pet, RentalDuration, RenterProfile, User
+from .models import Pet, PropertyType, RentalDuration, RenterProfile, User
 from .persistence import RentalStore
 from .search_profile import SearchProfile
 from .telegram_linking import create_telegram_link
@@ -178,6 +178,16 @@ class WebApplication:
         }
         if duration_value not in duration_options:
             raise ValueError("El tipo de alquiler no es válido.")
+        accepted_property_types = tuple(
+            value
+            for field, value in (
+                ("property_type_home", PropertyType.HOME),
+                ("property_type_room", PropertyType.ROOM),
+            )
+            if field in form
+        )
+        if not accepted_property_types:
+            raise ValueError("Selecciona vivienda completa, habitación o ambas.")
         move_in_value = form.get("move_in_by", "").strip()
         try:
             move_in_by = date.fromisoformat(move_in_value) if move_in_value else None
@@ -220,6 +230,7 @@ class WebApplication:
             municipality="Madrid",
             renter_profile_id=renter_id,
             acceptable_districts=districts,
+            accepted_property_types=accepted_property_types,
             preferred_min_bedrooms=min_bedrooms,
             allow_studios="allow_studios" in form,
             allow_unknown_bedrooms="allow_unknown_bedrooms" in form,
@@ -402,6 +413,8 @@ def _profile_page(
                 "max_rent_eur": search.max_rent_eur,
                 "preferred_min_bedrooms": search.preferred_min_bedrooms,
                 "acceptable_districts": ", ".join(search.acceptable_districts),
+                "property_type_home": "on" if PropertyType.HOME in search.accepted_property_types else "",
+                "property_type_room": "on" if PropertyType.ROOM in search.accepted_property_types else "",
                 "furnished": "any" if search.furnished is None else ("yes" if search.furnished else "no"),
                 "move_in_by": search.move_in_by.isoformat() if search.move_in_by else "",
                 "allow_studios": "on" if search.allow_studios else "",
@@ -419,6 +432,8 @@ def _profile_page(
     asap = form.get("move_in_asap", "on" if is_new else "") == "on"
     furnished = form.get("furnished", "any")
     rental_duration = form.get("rental_duration", "long_term")
+    property_type_home = form.get("property_type_home", "on" if is_new else "") == "on"
+    property_type_room = form.get("property_type_room", "") == "on"
     error_html = f'<div class="error" role="alert">{html.escape(error)}</div>' if error else ""
     session_note = "Tus datos se guardan en este navegador y puedes volver para cambiarlos." if user else "No necesitas instalar nada. Al terminar conectarás tu Telegram."
     body = f"""
@@ -434,7 +449,7 @@ def _profile_page(
           <label>Mobiliario<select name="furnished"><option value="any"{' selected' if furnished == 'any' else ''}>Me da igual</option><option value="yes"{' selected' if furnished == 'yes' else ''}>Amueblado</option><option value="no"{' selected' if furnished == 'no' else ''}>Sin amueblar</option></select></label>
           <label>Tipo de alquiler<select name="rental_duration"><option value="long_term"{' selected' if rental_duration == 'long_term' else ''}>Larga duración</option><option value="temporary"{' selected' if rental_duration == 'temporary' else ''}>Temporal / por temporada</option><option value="both"{' selected' if rental_duration == 'both' else ''}>Ambos</option></select></label>
           <label>Fecha límite de entrada <small>Opcional</small><input type="date" name="move_in_by" value="{_value(form, 'move_in_by')}"></label>
-        </div><div class="checks"><label><input type="checkbox" name="allow_studios"{_checked(studios)}> Incluir estudios</label><label><input type="checkbox" name="allow_unknown_bedrooms"{_checked(unknown)}> Incluir anuncios que no indican dormitorios</label><label><input type="checkbox" name="move_in_asap"{_checked(asap)}> Necesito entrar cuanto antes</label></div></fieldset>
+        </div><div class="checks"><label><input type="checkbox" name="property_type_home"{_checked(property_type_home)}> Vivienda completa</label><label><input type="checkbox" name="property_type_room"{_checked(property_type_room)}> Habitación</label><label><input type="checkbox" name="allow_studios"{_checked(studios)}> Incluir estudios</label><label><input type="checkbox" name="allow_unknown_bedrooms"{_checked(unknown)}> Incluir anuncios que no indican dormitorios</label><label><input type="checkbox" name="move_in_asap"{_checked(asap)}> Necesito entrar cuanto antes</label></div><small>Garajes y locales comerciales se excluyen siempre.</small></fieldset>
         <fieldset><legend>2 · Tú y tu situación</legend><div class="grid">
           <label>Tu nombre<input required maxlength="100" name="display_name" value="{_value(form, 'display_name')}"></label>
           <label>Correo <small>Opcional; aún no enviamos emails.</small><input type="email" maxlength="254" name="email" value="{_value(form, 'email')}"></label>

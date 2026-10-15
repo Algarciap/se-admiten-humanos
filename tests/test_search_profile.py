@@ -2,7 +2,7 @@
 
 import unittest
 
-from se_admiten_humanos.models import Listing, RentalDuration
+from se_admiten_humanos.models import Listing, PropertyType, RentalDuration
 from se_admiten_humanos.pet_policy import classify
 from se_admiten_humanos.search_profile import SearchProfile, evaluate_listing
 
@@ -29,6 +29,36 @@ class SearchProfileTests(unittest.TestCase):
 
         self.assertTrue(decision.eligible)
         self.assertEqual(decision.rejection_reasons, ())
+
+    def test_garages_are_rejected_from_default_home_search(self) -> None:
+        listing = Listing(
+            price_eur=100,
+            municipality="Madrid",
+            property_type=PropertyType.GARAGE,
+        )
+
+        decision = evaluate_listing(listing, classify(""), self.profile)
+
+        self.assertFalse(decision.eligible)
+        self.assertIn("property_type_mismatch", decision.rejection_reasons)
+
+    def test_room_search_is_independent_from_full_home_search(self) -> None:
+        room_profile = SearchProfile(
+            id="room-search",
+            user_id="user-1",
+            name="Habitación",
+            max_rent_eur=700,
+            municipality="Madrid",
+            accepted_property_types=(PropertyType.ROOM,),
+        )
+        room = Listing(
+            price_eur=650,
+            municipality="Madrid",
+            property_type=PropertyType.ROOM,
+        )
+
+        self.assertTrue(evaluate_listing(room, classify(""), room_profile).eligible)
+        self.assertFalse(evaluate_listing(room, classify(""), self.profile).eligible)
 
     def test_studios_and_unknown_bedrooms_remain_eligible(self) -> None:
         cases = ((0, "studio"), (None, "bedrooms_not_disclosed"))

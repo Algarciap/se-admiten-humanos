@@ -12,6 +12,7 @@ from urllib.request import Request, urlopen
 from xml.etree import ElementTree
 
 from .models import Listing, RentalDuration, WebsiteDiscovery
+from .property_type import classify_property_type
 from .rental_duration import classify_rental_duration
 
 
@@ -166,6 +167,7 @@ def parse_listing(html_text: str, discovery: WebsiteDiscovery) -> Listing:
         location=municipality,
         municipality=municipality,
         address=address,
+        property_type=classify_property_type(title, discovery.url),
         bedrooms=int(bedrooms_match.group("count")) if bedrooms_match else None,
         area_sqm=int(area_match.group("area")) if area_match else None,
         is_furnished=furnished,

@@ -64,6 +64,7 @@ class WebTests(unittest.TestCase):
             "sender_name": "Ana",
             "max_rent_eur": "1100",
             "preferred_min_bedrooms": "1",
+            "property_type_home": "on",
             "allow_studios": "on",
             "allow_unknown_bedrooms": "on",
             "move_in_asap": "on",
@@ -97,6 +98,7 @@ class WebTests(unittest.TestCase):
             profiles = store.load_enabled_search_profiles()
             self.assertEqual(len(profiles), 1)
             self.assertEqual(profiles[0].max_rent_eur, 1100)
+            self.assertEqual(profiles[0].accepted_property_types[0].value, "home")
             self.assertEqual(profiles[0].acceptable_districts, ("Centro", "Chamberí"))
             self.assertTrue(profiles[0].requires_pet_acceptance)
             self.assertEqual(len(profiles[0].accepted_rental_durations), 2)

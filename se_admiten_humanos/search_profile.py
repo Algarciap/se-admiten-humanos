@@ -6,7 +6,7 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import date
 
-from .models import Listing, PetDecision, PetStatus, RentalDuration
+from .models import Listing, PetDecision, PetStatus, PropertyType, RentalDuration
 
 
 def _normalize_place(value: str) -> str:
@@ -28,6 +28,7 @@ class SearchProfile:
     municipality: str
     renter_profile_id: str | None = None
     acceptable_districts: tuple[str, ...] = ()
+    accepted_property_types: tuple[PropertyType, ...] = (PropertyType.HOME,)
     preferred_min_bedrooms: int = 1
     allow_studios: bool = True
     allow_unknown_bedrooms: bool = True
@@ -54,6 +55,13 @@ class SearchProfile:
             raise ValueError("Preferred bedroom count cannot be negative")
         if not self.accepted_rental_durations:
             raise ValueError("At least one rental duration must be accepted")
+        if not self.accepted_property_types:
+            raise ValueError("At least one property type must be accepted")
+        residential_types = {PropertyType.HOME, PropertyType.ROOM}
+        if any(value not in residential_types for value in self.accepted_property_types):
+            raise ValueError("Only homes and rooms can be selected")
+        if len(self.accepted_property_types) != len(set(self.accepted_property_types)):
+            raise ValueError("Accepted property types must be unique")
         if len(self.accepted_rental_durations) != len(set(self.accepted_rental_durations)):
             raise ValueError("Accepted rental durations must be unique")
         normalized_districts = [
@@ -86,6 +94,9 @@ def evaluate_listing(
 
     if not profile.enabled:
         rejections.append("profile_disabled")
+
+    if listing.property_type not in profile.accepted_property_types:
+        rejections.append("property_type_mismatch")
 
     if listing.price_eur is None:
         rejections.append("rent_not_disclosed")

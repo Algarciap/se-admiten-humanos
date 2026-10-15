@@ -12,11 +12,11 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from .models import Listing, Pet, PetDecision, RentalDuration, RenterProfile, User, WebsiteDiscovery
+from .models import Listing, Pet, PetDecision, PropertyType, RentalDuration, RenterProfile, User, WebsiteDiscovery
 from .search_profile import SearchDecision, SearchProfile
 
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 _TELEGRAM_CHAT_ID = re.compile(r"-?[1-9][0-9]*")
 
@@ -193,6 +193,7 @@ class RentalStore:
             self._migrate_v5_to_v6()
             self._migrate_v6_to_v7()
             self._migrate_v7_to_v8()
+            self._migrate_v8_to_v9()
         elif version == 1:
             self._migrate_v1_to_v2()
             self._migrate_v2_to_v3()
@@ -201,6 +202,7 @@ class RentalStore:
             self._migrate_v5_to_v6()
             self._migrate_v6_to_v7()
             self._migrate_v7_to_v8()
+            self._migrate_v8_to_v9()
         elif version == 2:
             self._migrate_v2_to_v3()
             self._migrate_v3_to_v4()
@@ -208,26 +210,34 @@ class RentalStore:
             self._migrate_v5_to_v6()
             self._migrate_v6_to_v7()
             self._migrate_v7_to_v8()
+            self._migrate_v8_to_v9()
         elif version == 3:
             self._migrate_v3_to_v4()
             self._migrate_v4_to_v5()
             self._migrate_v5_to_v6()
             self._migrate_v6_to_v7()
             self._migrate_v7_to_v8()
+            self._migrate_v8_to_v9()
         elif version == 4:
             self._migrate_v4_to_v5()
             self._migrate_v5_to_v6()
             self._migrate_v6_to_v7()
             self._migrate_v7_to_v8()
+            self._migrate_v8_to_v9()
         elif version == 5:
             self._migrate_v5_to_v6()
             self._migrate_v6_to_v7()
             self._migrate_v7_to_v8()
+            self._migrate_v8_to_v9()
         elif version == 6:
             self._migrate_v6_to_v7()
             self._migrate_v7_to_v8()
+            self._migrate_v8_to_v9()
         elif version == 7:
             self._migrate_v7_to_v8()
+            self._migrate_v8_to_v9()
+        elif version == 8:
+            self._migrate_v8_to_v9()
         elif version != SCHEMA_VERSION:
             raise RuntimeError(
                 f"Unsupported database schema version {version}; expected {SCHEMA_VERSION}"
@@ -485,6 +495,17 @@ class RentalStore:
         )
         self.connection.commit()
 
+    def _migrate_v8_to_v9(self) -> None:
+        self.connection.executescript(
+            """
+            alter table search_profiles add column accepted_property_types_json
+                text not null default '["home"]';
+
+            pragma user_version = 9;
+            """
+        )
+        self.connection.commit()
+
     def website_source_initialized(self, source_id: str) -> bool:
         """Return whether a website source has an explicit no-alert baseline."""
 
@@ -496,6 +517,23 @@ class RentalStore:
             (normalized_source_id,),
         ).fetchone()
         return row is not None
+
+    def website_source_due(self, source_id: str, interval_seconds: int) -> bool:
+        """Return whether an initialized source may consume its next remote request."""
+
+        if interval_seconds < 60:
+            raise ValueError("Source poll interval must be at least 60 seconds")
+        normalized_source_id = source_id.strip().casefold()
+        row = self.connection.execute(
+            "select last_scan_at from website_source_state where source_id = ?",
+            (normalized_source_id,),
+        ).fetchone()
+        if row is None:
+            return True
+        last_scan = datetime.fromisoformat(str(row[0]))
+        if last_scan.tzinfo is None:
+            last_scan = last_scan.replace(tzinfo=UTC)
+        return datetime.now(UTC) - last_scan >= timedelta(seconds=interval_seconds)
 
     def baseline_website_discoveries(
         self,
@@ -1193,11 +1231,12 @@ class RentalStore:
                 insert into search_profiles (
                     id, user_id, renter_profile_id, name, max_rent_eur,
                     municipality, acceptable_districts_json,
+                    accepted_property_types_json,
                     preferred_min_bedrooms, allow_studios,
                     allow_unknown_bedrooms, furnished, move_in_asap, move_in_by,
                     accepted_rental_durations_json, requires_pet_acceptance,
                     enabled, created_at, updated_at
-                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict(id) do update set
                     user_id = excluded.user_id,
                     renter_profile_id = excluded.renter_profile_id,
@@ -1205,6 +1244,7 @@ class RentalStore:
                     max_rent_eur = excluded.max_rent_eur,
                     municipality = excluded.municipality,
                     acceptable_districts_json = excluded.acceptable_districts_json,
+                    accepted_property_types_json = excluded.accepted_property_types_json,
                     preferred_min_bedrooms = excluded.preferred_min_bedrooms,
                     allow_studios = excluded.allow_studios,
                     allow_unknown_bedrooms = excluded.allow_unknown_bedrooms,
@@ -1224,6 +1264,7 @@ class RentalStore:
                     profile.max_rent_eur,
                     profile.municipality,
                     json.dumps(profile.acceptable_districts, ensure_ascii=False),
+                    json.dumps([value.value for value in profile.accepted_property_types]),
                     profile.preferred_min_bedrooms,
                     int(profile.allow_studios),
                     int(profile.allow_unknown_bedrooms),
@@ -1246,6 +1287,7 @@ class RentalStore:
             select
                 id, user_id, name, max_rent_eur, municipality,
                 renter_profile_id, acceptable_districts_json,
+                accepted_property_types_json,
                 preferred_min_bedrooms, allow_studios,
                 allow_unknown_bedrooms, furnished, move_in_asap, move_in_by,
                 accepted_rental_durations_json, requires_pet_acceptance, enabled
@@ -1266,6 +1308,7 @@ class RentalStore:
             select
                 id, user_id, name, max_rent_eur, municipality,
                 renter_profile_id, acceptable_districts_json,
+                accepted_property_types_json,
                 preferred_min_bedrooms, allow_studios,
                 allow_unknown_bedrooms, furnished, move_in_asap, move_in_by,
                 accepted_rental_durations_json, requires_pet_acceptance, enabled
@@ -1286,6 +1329,7 @@ class RentalStore:
             select
                 id, user_id, name, max_rent_eur, municipality,
                 renter_profile_id, acceptable_districts_json,
+                accepted_property_types_json,
                 preferred_min_bedrooms, allow_studios,
                 allow_unknown_bedrooms, furnished, move_in_asap, move_in_by,
                 accepted_rental_durations_json, requires_pet_acceptance, enabled
@@ -1298,8 +1342,8 @@ class RentalStore:
 
     @staticmethod
     def _search_profile_from_row(row: tuple[object, ...]) -> SearchProfile:
-        furnished = None if row[10] is None else bool(row[10])
-        move_in_by = date.fromisoformat(row[12]) if row[12] else None
+        furnished = None if row[11] is None else bool(row[11])
+        move_in_by = date.fromisoformat(row[13]) if row[13] else None
         return SearchProfile(
             id=str(row[0]),
             user_id=str(row[1]),
@@ -1308,17 +1352,20 @@ class RentalStore:
             municipality=str(row[4]),
             renter_profile_id=str(row[5]) if row[5] is not None else None,
             acceptable_districts=tuple(json.loads(row[6])),
-            preferred_min_bedrooms=int(row[7]),
-            allow_studios=bool(row[8]),
-            allow_unknown_bedrooms=bool(row[9]),
+            accepted_property_types=tuple(
+                PropertyType(value) for value in json.loads(str(row[7]))
+            ),
+            preferred_min_bedrooms=int(row[8]),
+            allow_studios=bool(row[9]),
+            allow_unknown_bedrooms=bool(row[10]),
             furnished=furnished,
-            move_in_asap=bool(row[11]),
+            move_in_asap=bool(row[12]),
             move_in_by=move_in_by,
             accepted_rental_durations=tuple(
-                RentalDuration(value) for value in json.loads(str(row[13]))
+                RentalDuration(value) for value in json.loads(str(row[14]))
             ),
-            requires_pet_acceptance=bool(row[14]),
-            enabled=bool(row[15]),
+            requires_pet_acceptance=bool(row[15]),
+            enabled=bool(row[16]),
         )
 
     def upsert(self, listing: Listing) -> UpsertResult:

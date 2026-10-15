@@ -8,7 +8,7 @@ from datetime import date
 from pathlib import Path
 from typing import Iterable, Mapping, Protocol
 
-from .models import Listing, RentalDuration
+from .models import Listing, PropertyType, RentalDuration
 from .persistence import RentalStore, SourceRunRecord
 from .pipeline import ListingPipeline, ProcessingResult
 from .telegram import DeliveryAttempt
@@ -113,6 +113,14 @@ class JsonFileAdapter:
                 except ValueError as error:
                     raise ValueError(
                         f"Listing {index} rental_duration is invalid"
+                    ) from error
+            property_type = values.get("property_type")
+            if property_type is not None:
+                try:
+                    values["property_type"] = PropertyType(str(property_type))
+                except ValueError as error:
+                    raise ValueError(
+                        f"Listing {index} property_type is invalid"
                     ) from error
             try:
                 yield Listing(**values)

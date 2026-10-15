@@ -5,6 +5,7 @@ This is the initial hosted topology for `Se admiten humanos`:
 ```text
 Railway combined web + worker service (one replica)
     ├── polls Alquiler Seguro, Tecnocasa, Redpiso, and Nestar every 180 seconds
+    ├── polls the official Idealista API every 900 seconds when credentials exist
     ├── accepts user-owned search profiles over HTTPS
     ├── sends eligible new listings to Telegram
     └── reads/writes /data/rentals.sqlite3
@@ -47,6 +48,10 @@ private.
 | `TELEGRAM_CHAT_ID` | Legacy bootstrap: first user's numeric private chat id |
 | `TELEGRAM_USER_ID` | Legacy bootstrap: first user's application id |
 | `PROFILE_BUNDLE_JSON` | Entire private profile file as one JSON value |
+| `IDEALISTA_API_KEY` | Approved Idealista Search API key; omit until access is granted |
+| `IDEALISTA_API_SECRET` | Matching Idealista secret; must be configured with the key |
+| `IDEALISTA_POLL_INTERVAL_SECONDS` | Idealista-only cadence; default `900` to conserve quota |
+| `IDEALISTA_MAX_PAGES` | Pages per requested category; keep `1` until quota is confirmed |
 
 For `PROFILE_BUNDLE_JSON`, copy the contents of the ignored `config/profiles.local.json`. Minifying
 it first makes pasting less error-prone, but whitespace and line breaks are valid JSON. Do not add
@@ -72,7 +77,7 @@ The first successful worker cycle performs these operations in order:
 1. Creates the SQLite schema on the persistent volume.
 2. Imports the private user, renter, pet, and search profile.
 3. Polls Telegram account-link commands when `TELEGRAM_BOT_USERNAME` is configured.
-4. Discovers current Alquiler Seguro, Tecnocasa, Redpiso, and Nestar inventory from their published sitemaps.
+4. Discovers current Alquiler Seguro, Tecnocasa, Redpiso, and Nestar inventory from their published sitemaps and, when credentials are configured, through the official Idealista API.
 5. Records every current listing id as a separate no-alert baseline for each source.
 6. Writes a `baseline_created` event to the Railway logs and sends zero property alerts.
 

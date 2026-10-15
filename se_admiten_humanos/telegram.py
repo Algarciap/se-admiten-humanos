@@ -11,7 +11,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-from .models import Listing, PetDecision, PetStatus, RentalDuration
+from .models import Listing, PetDecision, PetStatus, PropertyType, RentalDuration
 from .persistence import RentalStore
 from .pipeline import ProcessingResult, ProfileMatchOutcome
 
@@ -28,6 +28,13 @@ _DURATION_LABELS = {
     RentalDuration.LONG_TERM: "larga duración",
     RentalDuration.TEMPORARY: "temporal",
     RentalDuration.NOT_SPECIFIED: "no especificado",
+}
+_PROPERTY_TYPE_LABELS = {
+    PropertyType.HOME: "vivienda completa",
+    PropertyType.ROOM: "habitación",
+    PropertyType.GARAGE: "garaje",
+    PropertyType.COMMERCIAL: "local comercial",
+    PropertyType.NOT_SPECIFIED: "no especificado",
 }
 
 
@@ -73,6 +80,7 @@ def format_alert(
     elif pet_decision.evidence:
         lines.append(f"Evidencia: {pet_decision.evidence}")
     lines.append(f"Tipo de alquiler: {_DURATION_LABELS[listing.rental_duration]}")
+    lines.append(f"Tipo de inmueble: {_PROPERTY_TYPE_LABELS[listing.property_type]}")
     if listing.rental_duration_evidence:
         lines.append(f"Evidencia de duración: {listing.rental_duration_evidence}")
     lines.extend(("", f"Búsqueda: {outcome.profile.name}", f"Fuente: {listing.source_id}"))

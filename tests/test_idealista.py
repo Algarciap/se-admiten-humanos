@@ -15,6 +15,7 @@ from se_admiten_humanos.idealista import (
     IdealistaApiAdapter,
     IdealistaApiClient,
     IdealistaApiError,
+    IdealistaApiSource,
     IdealistaSearchConfig,
 )
 from se_admiten_humanos.models import User
@@ -90,6 +91,43 @@ class IdealistaTests(unittest.TestCase):
         self.assertEqual(listing.address, "")
         self.assertTrue(listing.is_furnished)
         self.assertIn("Lavapiés-Embajadores", listing.location)
+
+    def test_room_category_is_preserved_as_a_room(self) -> None:
+        client = Mock()
+        client.search.return_value = {
+            "elementList": [api_listing()],
+            "totalPages": 1,
+        }
+        adapter = IdealistaApiAdapter(
+            client,
+            IdealistaSearchConfig(property_types=("bedrooms",)),
+        )
+
+        listing = tuple(adapter.fetch())[0]
+
+        self.assertEqual(listing.property_type.value, "room")
+        self.assertEqual(client.search.call_args.args[0]["propertyType"], "bedrooms")
+
+    def test_baseline_source_discovers_then_normalizes_cached_identity(self) -> None:
+        client = Mock()
+        client.search.return_value = {
+            "elementList": [api_listing()],
+            "totalPages": 1,
+        }
+        source = IdealistaApiSource(client, IdealistaSearchConfig())
+
+        discovery = source.discover()[0]
+        listing = source.fetch_listing(discovery)
+
+        self.assertEqual(discovery.external_id, "123456")
+        self.assertEqual(listing.external_id, discovery.external_id)
+
+    def test_baseline_source_refuses_zero_listing_snapshot(self) -> None:
+        client = Mock()
+        client.search.return_value = {"elementList": [], "totalPages": 0}
+
+        with self.assertRaisesRegex(IdealistaApiError, "zero listings"):
+            IdealistaApiSource(client, IdealistaSearchConfig()).discover()
 
     def test_adapter_follows_only_configured_pages(self) -> None:
         client = Mock()

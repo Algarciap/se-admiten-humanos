@@ -3,7 +3,7 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from se_admiten_humanos.models import Listing, WebsiteDiscovery
 from se_admiten_humanos.persistence import RentalStore
@@ -13,6 +13,7 @@ from se_admiten_humanos.worker import (
     WorkerConfigurationError,
     WorkerCycleResult,
     WorkerSettings,
+    _idealista_source,
     default_website_sources,
     run_worker,
     run_worker_cycle,
@@ -51,6 +52,28 @@ class DefaultSourceTests(unittest.TestCase):
             [source.source_id for source in default_website_sources()],
             ["alquiler_seguro", "tecnocasa", "redpiso", "nestar"],
         )
+
+    def test_idealista_credentials_enable_only_requested_api_categories(self):
+        profile = Mock(max_rent_eur=700, accepted_property_types=())
+        from se_admiten_humanos.models import PropertyType
+
+        profile.accepted_property_types = (PropertyType.ROOM,)
+        source = _idealista_source(
+            {"IDEALISTA_API_KEY": "key", "IDEALISTA_API_SECRET": "secret"},
+            (profile,),
+            Mock(),
+        )
+
+        self.assertEqual(source.source_id, "idealista")
+        self.assertEqual(source.config.max_price_eur, 700)
+        self.assertEqual(source.config.property_types, ("bedrooms",))
+
+    def test_partial_idealista_credentials_fail_visibly(self):
+        with self.assertRaisesRegex(WorkerConfigurationError, "configured together"):
+            _idealista_source(
+                {"IDEALISTA_API_KEY": "key"},
+                (Mock(max_rent_eur=950, accepted_property_types=()),),
+            )
 
 
 class RecordingNotifier:

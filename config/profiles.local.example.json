@@ -34,6 +34,7 @@
       "max_rent_eur": 1000,
       "municipality": "Madrid",
       "acceptable_districts": [],
+      "accepted_property_types": ["home"],
       "preferred_min_bedrooms": 1,
       "allow_studios": true,
       "allow_unknown_bedrooms": true,

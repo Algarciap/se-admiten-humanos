@@ -13,6 +13,8 @@ from typing import Protocol
 
 from .acquisition import AcquisitionResult, AcquisitionRunner, Notifier
 from .alquiler_seguro import AlquilerSeguroSource
+from .idealista import IdealistaApiClient, IdealistaApiSource, IdealistaSearchConfig, MADRID_CENTER
+from .models import PropertyType
 from .nestar import NestarSource
 from .persistence import RentalStore
 from .profile_config import ProfileBundle, load_profile_bundle_json
@@ -144,6 +146,56 @@ def default_website_sources() -> tuple[WebsiteSource, ...]:
     )
 
 
+def _idealista_source(
+    environment: Mapping[str, str],
+    profiles,
+    client: IdealistaApiClient | None = None,
+) -> IdealistaApiSource | None:
+    api_key = environment.get("IDEALISTA_API_KEY", "").strip()
+    api_secret = environment.get("IDEALISTA_API_SECRET", "").strip()
+    if not api_key and not api_secret:
+        return None
+    if not api_key or not api_secret:
+        raise WorkerConfigurationError(
+            "IDEALISTA_API_KEY and IDEALISTA_API_SECRET must be configured together"
+        )
+    try:
+        distance = int(environment.get("IDEALISTA_DISTANCE_METERS", "20000"))
+        max_pages = int(environment.get("IDEALISTA_MAX_PAGES", "1"))
+        poll_interval = int(
+            environment.get("IDEALISTA_POLL_INTERVAL_SECONDS", "900")
+        )
+    except ValueError as error:
+        raise WorkerConfigurationError(
+            "Idealista numeric settings must contain whole numbers"
+        ) from error
+    requested_types = {value for profile in profiles for value in profile.accepted_property_types}
+    api_property_types = tuple(
+        api_type
+        for property_type, api_type in (
+            (PropertyType.HOME, "homes"),
+            (PropertyType.ROOM, "bedrooms"),
+        )
+        if property_type in requested_types
+    )
+    try:
+        config = IdealistaSearchConfig(
+            center=environment.get("IDEALISTA_CENTER", MADRID_CENTER).strip(),
+            distance_meters=distance,
+            max_price_eur=max(profile.max_rent_eur for profile in profiles),
+            since_date=environment.get("IDEALISTA_SINCE_DATE", "T").strip(),
+            max_pages=max_pages,
+            property_types=api_property_types,
+        )
+        return IdealistaApiSource(
+            client or IdealistaApiClient(api_key, api_secret),
+            config,
+            minimum_poll_interval_seconds=poll_interval,
+        )
+    except ValueError as error:
+        raise WorkerConfigurationError(str(error)) from error
+
+
 def _poll_telegram_links(
     store: RentalStore,
     environment: Mapping[str, str],
@@ -252,11 +304,13 @@ def run_worker_sources_cycle(
     *,
     sources: tuple[WebsiteSource, ...] | None = None,
     notifier_factory: NotifierFactory = notifier_from_environment,
+    idealista_client: IdealistaApiClient | None = None,
 ) -> WorkerBatchResult:
     """Run all enabled website sources, isolating one parser failure from the rest."""
 
     settings.validate()
-    website_sources = default_website_sources() if sources is None else sources
+    use_default_sources = sources is None
+    website_sources = default_website_sources() if use_default_sources else sources
     if not website_sources:
         raise WorkerConfigurationError("At least one website source is required")
     source_ids = [source.source_id.strip().casefold() for source in website_sources]
@@ -266,6 +320,14 @@ def run_worker_sources_cycle(
         raise WorkerConfigurationError("Website source ids must be non-empty and unique")
     with RentalStore(settings.database_path) as store:
         profiles_imported = _ensure_profiles(store, environment)
+        if use_default_sources:
+            idealista = _idealista_source(
+                environment,
+                store.load_enabled_search_profiles(),
+                idealista_client,
+            )
+            if idealista is not None:
+                website_sources = (*website_sources, idealista)
         telegram_linking, telegram_linking_error = _poll_telegram_links(
             store, environment
         )
@@ -275,6 +337,21 @@ def run_worker_sources_cycle(
         for website_source in website_sources:
             adapter = WebsiteWatcherAdapter(store, website_source)
             try:
+                minimum_interval = getattr(
+                    website_source, "minimum_poll_interval_seconds", None
+                )
+                if (
+                    minimum_interval is not None
+                    and store.website_source_initialized(adapter.source_id)
+                    and not store.website_source_due(adapter.source_id, minimum_interval)
+                ):
+                    results.append(
+                        WorkerCycleResult(
+                            source_id=adapter.source_id,
+                            status="not_due",
+                        )
+                    )
+                    continue
                 if not store.website_source_initialized(adapter.source_id):
                     baseline = adapter.initialize_baseline()
                     results.append(
@@ -316,7 +393,7 @@ def run_worker_sources_cycle(
             status = "partial_failure"
         elif all(result.status == "baseline_created" for result in results):
             status = "baseline_created"
-        elif all(result.status == "empty" for result in results):
+        elif all(result.status in {"empty", "not_due"} for result in results):
             status = "empty"
         else:
             status = "succeeded"
@@ -343,12 +420,24 @@ def run_worker(
     """Poll forever, failing after repeated errors so the platform restarts us."""
 
     values = dict(os.environ if environment is None else environment)
+    idealista_client: IdealistaApiClient | None = None
+    api_key = values.get("IDEALISTA_API_KEY", "").strip()
+    api_secret = values.get("IDEALISTA_API_SECRET", "").strip()
+    if api_key and api_secret and cycle is run_worker_sources_cycle:
+        idealista_client = IdealistaApiClient(api_key, api_secret)
     consecutive_failures = 0
     cycles = 0
     while max_cycles is None or cycles < max_cycles:
         started = time.monotonic()
         try:
-            result = cycle(settings, values)
+            if cycle is run_worker_sources_cycle:
+                result = run_worker_sources_cycle(
+                    settings,
+                    values,
+                    idealista_client=idealista_client,
+                )
+            else:
+                result = cycle(settings, values)
             if (
                 isinstance(result, WorkerBatchResult)
                 and result.status == "partial_failure"

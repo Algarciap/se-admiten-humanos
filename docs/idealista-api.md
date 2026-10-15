@@ -20,6 +20,10 @@ IDEALISTA_API_KEY=
 IDEALISTA_API_SECRET=
 ```
 
+On Railway, add the same two values as sealed service variables. When both are present, the hosted
+worker enables Idealista automatically. A partial credential pair stops startup visibly instead of
+silently disabling the source.
+
 Import at least one enabled search profile and run:
 
 ```powershell
@@ -27,10 +31,14 @@ python -m se_admiten_humanos run-idealista --database rentals.sqlite3
 ```
 
 The adapter derives the API maximum price from the highest enabled search budget, then applies each
-user's exact profile independently in the shared processing pipeline. Studios and listings whose
-bedroom count is absent are not removed at acquisition time.
+user's exact profile independently in the shared processing pipeline. It queries the official
+`homes` category when any enabled search requests a full home and `bedrooms` when any search requests
+a room. Garages and commercial units are never requested. Studios and listings whose bedroom count
+is absent are not removed at acquisition time.
 
-The default run requests at most one page of 50 homes published in the API's recent-rental window.
-Do not schedule recurring runs or raise `--max-pages` until Idealista confirms the account's quota
-and rate limits. API errors and response-shape changes are stored as failed source runs rather than
-being treated as an empty search.
+The hosted default runs Idealista at most once every 15 minutes and requests one page of 50 results
+per requested category from the recent-rental window. The first response creates a no-alert baseline;
+later responses process only newly seen property codes. Keep `IDEALISTA_MAX_PAGES=1` and adjust
+`IDEALISTA_POLL_INTERVAL_SECONDS` only after Idealista confirms the account's quota and rate limits.
+API errors, zero-result snapshots, and response-shape changes fail visibly rather than being treated
+as an empty search.

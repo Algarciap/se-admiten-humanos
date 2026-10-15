@@ -9,7 +9,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from .models import Pet, RentalDuration, RenterProfile, User
+from .models import Pet, PropertyType, RentalDuration, RenterProfile, User
 from .search_profile import SearchProfile
 
 
@@ -108,6 +108,16 @@ def _search_profile(payload: Any) -> SearchProfile:
         accepted_durations = tuple(RentalDuration(str(item)) for item in duration_values)
     except ValueError as error:
         raise ValueError("accepted_rental_durations contains an unknown value") from error
+    property_type_values = _items(
+        values.get("accepted_property_types", ["home"]),
+        "accepted_property_types",
+    )
+    try:
+        accepted_property_types = tuple(
+            PropertyType(str(item)) for item in property_type_values
+        )
+    except ValueError as error:
+        raise ValueError("accepted_property_types contains an unknown value") from error
     return SearchProfile(
         id=str(values["id"]),
         user_id=str(values["user_id"]),
@@ -126,6 +136,7 @@ def _search_profile(payload: Any) -> SearchProfile:
                 "acceptable_districts",
             )
         ),
+        accepted_property_types=accepted_property_types,
         preferred_min_bedrooms=int(values.get("preferred_min_bedrooms", 1)),
         allow_studios=_boolean(values, "allow_studios", True),
         allow_unknown_bedrooms=_boolean(

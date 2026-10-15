@@ -24,6 +24,16 @@ class RentalDuration(str, Enum):
     NOT_SPECIFIED = "not_specified"
 
 
+class PropertyType(str, Enum):
+    """Residential property categories supported by user searches."""
+
+    HOME = "home"
+    ROOM = "room"
+    GARAGE = "garage"
+    COMMERCIAL = "commercial"
+    NOT_SPECIFIED = "not_specified"
+
+
 @dataclass(frozen=True, slots=True)
 class PetDecision:
     """Explainable result of evaluating a listing's pet policy."""
@@ -47,6 +57,7 @@ class Listing:
     municipality: str = ""
     district: str = ""
     address: str = ""
+    property_type: PropertyType = PropertyType.HOME
     bedrooms: int | None = None
     area_sqm: int | None = None
     is_furnished: bool | None = None

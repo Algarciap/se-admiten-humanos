@@ -11,7 +11,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 
-from .models import Listing, RentalDuration
+from .models import Listing, PropertyType, RentalDuration, WebsiteDiscovery
 from .rental_duration import classify_rental_duration
 
 
@@ -34,6 +34,7 @@ class IdealistaSearchConfig:
     since_date: str = "T"
     max_items_per_page: int = 50
     max_pages: int = 1
+    property_types: tuple[str, ...] = ("homes",)
 
     def __post_init__(self) -> None:
         coordinates = self.center.split(",")
@@ -57,14 +58,20 @@ class IdealistaSearchConfig:
             raise ValueError("Idealista page size must be between 1 and 50")
         if not 1 <= self.max_pages <= 10:
             raise ValueError("Idealista page limit must be between 1 and 10")
+        if not self.property_types or any(
+            value not in {"homes", "bedrooms"} for value in self.property_types
+        ):
+            raise ValueError("Idealista property types must contain homes or bedrooms")
+        if len(self.property_types) != len(set(self.property_types)):
+            raise ValueError("Idealista property types must be unique")
 
-    def parameters(self, page: int) -> dict[str, str]:
+    def parameters(self, page: int, property_type: str | None = None) -> dict[str, str]:
         if not 1 <= page <= self.max_pages:
             raise ValueError("Idealista page is outside the configured run limit")
         return {
             "center": self.center,
             "distance": str(self.distance_meters),
-            "propertyType": "homes",
+            "propertyType": property_type or self.property_types[0],
             "operation": "rent",
             "maxPrice": str(self.max_price_eur),
             "sinceDate": self.since_date,
@@ -171,19 +178,80 @@ class IdealistaApiAdapter:
         self.config = config
 
     def fetch(self):
-        for page in range(1, self.config.max_pages + 1):
-            payload = self.client.search(self.config.parameters(page))
+        for api_type, page, index, element in _search_elements(self.client, self.config):
+            yield _normalize_listing(element, page, index, api_type)
+
+
+class IdealistaApiSource:
+    """Baseline-safe two-stage source backed only by Idealista's official API."""
+
+    source_id = "idealista"
+
+    def __init__(
+        self,
+        client: IdealistaApiClient,
+        config: IdealistaSearchConfig,
+        *,
+        minimum_poll_interval_seconds: int = 900,
+    ) -> None:
+        if minimum_poll_interval_seconds < 60:
+            raise ValueError("Idealista poll interval must be at least 60 seconds")
+        self.client = client
+        self.config = config
+        self.minimum_poll_interval_seconds = minimum_poll_interval_seconds
+        self._latest_elements: dict[
+            str, tuple[Mapping[str, object], int, int, str]
+        ] = {}
+
+    def discover(self) -> tuple[WebsiteDiscovery, ...]:
+        latest: dict[str, tuple[Mapping[str, object], int, int, str]] = {}
+        discoveries: list[WebsiteDiscovery] = []
+        for api_type, page, index, element in _search_elements(self.client, self.config):
+            external_id = _required_text(element, "propertyCode", page, index)
+            url = _required_text(element, "url", page, index)
+            _validate_listing_url(url, page, index)
+            if external_id in latest:
+                raise IdealistaApiError(
+                    f"Idealista returned duplicate propertyCode {external_id!r}"
+                )
+            latest[external_id] = (element, page, index, api_type)
+            discoveries.append(WebsiteDiscovery(external_id, url))
+        if not discoveries:
+            raise IdealistaApiError(
+                "Idealista search returned zero listings; refusing to treat it as an empty snapshot"
+            )
+        self._latest_elements = latest
+        return tuple(discoveries)
+
+    def fetch_listing(self, discovery: WebsiteDiscovery) -> Listing:
+        cached = self._latest_elements.get(discovery.external_id)
+        if cached is None:
+            raise IdealistaApiError(
+                f"Idealista listing {discovery.external_id!r} is no longer in the current API snapshot"
+            )
+        element, page, index, api_type = cached
+        listing = _normalize_listing(element, page, index, api_type)
+        if listing.url.rstrip("/") != discovery.url.rstrip("/"):
+            raise IdealistaApiError("Idealista detail identity URL changed during the run")
+        return listing
+
+
+def _search_elements(
+    client: IdealistaApiClient,
+    config: IdealistaSearchConfig,
+):
+    for api_type in config.property_types:
+        for page in range(1, config.max_pages + 1):
+            payload = client.search(config.parameters(page, api_type))
             elements = payload.get("elementList")
             if not isinstance(elements, list):
-                raise IdealistaApiError(
-                    "Idealista search response has no elementList array"
-                )
+                raise IdealistaApiError("Idealista search response has no elementList array")
             for index, element in enumerate(elements, start=1):
                 if not isinstance(element, Mapping):
                     raise IdealistaApiError(
-                        f"Idealista page {page} listing {index} is not an object"
+                        f"Idealista {api_type} page {page} listing {index} is not an object"
                     )
-                yield _normalize_listing(element, page, index)
+                yield api_type, page, index, element
 
             total_pages = payload.get("totalPages")
             if total_pages is not None:
@@ -191,7 +259,7 @@ class IdealistaApiAdapter:
                     raise IdealistaApiError("Idealista totalPages is invalid")
                 if page >= total_pages:
                     break
-            elif len(elements) < self.config.max_items_per_page:
+            elif len(elements) < config.max_items_per_page:
                 break
 
 
@@ -234,22 +302,12 @@ def _normalize_listing(
     element: Mapping[str, object],
     page: int,
     index: int,
+    api_property_type: str = "homes",
 ) -> Listing:
     external_id = _required_text(element, "propertyCode", page, index)
     municipality = _required_text(element, "municipality", page, index)
     url = _required_text(element, "url", page, index)
-    parsed_url = urlsplit(url)
-    host = (parsed_url.hostname or "").casefold()
-    if (
-        parsed_url.scheme not in {"http", "https"}
-        or (host != "idealista.com" and not host.endswith(".idealista.com"))
-        or parsed_url.username
-        or parsed_url.password
-    ):
-        raise IdealistaApiError(
-            f"Idealista page {page} listing {index} has an invalid URL"
-        )
-
+    _validate_listing_url(url, page, index)
     price = _optional_integer(element, "price", page, index)
     if price is None or price <= 0:
         raise IdealistaApiError(
@@ -292,6 +350,9 @@ def _normalize_listing(
             if element.get("showAddress") is True
             else ""
         ),
+        property_type=(
+            PropertyType.ROOM if api_property_type == "bedrooms" else PropertyType.HOME
+        ),
         bedrooms=rooms,
         area_sqm=area,
         is_furnished=furnished if isinstance(furnished, bool) else None,
@@ -300,3 +361,17 @@ def _normalize_listing(
         rental_duration_evidence=duration_evidence,
         url=url,
     )
+
+
+def _validate_listing_url(url: str, page: int, index: int) -> None:
+    parsed_url = urlsplit(url)
+    host = (parsed_url.hostname or "").casefold()
+    if (
+        parsed_url.scheme not in {"http", "https"}
+        or (host != "idealista.com" and not host.endswith(".idealista.com"))
+        or parsed_url.username
+        or parsed_url.password
+    ):
+        raise IdealistaApiError(
+            f"Idealista page {page} listing {index} has an invalid URL"
+        )
