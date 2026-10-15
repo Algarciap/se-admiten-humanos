@@ -180,6 +180,11 @@ class WebTests(unittest.TestCase):
             "legend{float:left;width:100%;padding:0;margin:0 0 10px}", page
         )
         self.assertIn("legend+.grid{clear:both}", page)
+        self.assertIn("input[type=date]{min-width:0;max-width:100%}", page)
+        self.assertIn(
+            "header{align-items:center;gap:10px;padding:20px 16px}", page
+        )
+        self.assertIn("white-space:nowrap", page)
         self.assertIn(
             ".cards{border-top:2px solid var(--ink);padding-top:20px}", page
         )
