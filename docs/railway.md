@@ -4,7 +4,7 @@ This is the initial hosted topology for `Se admiten humanos`:
 
 ```text
 Railway combined web + worker service (one replica)
-    ├── polls Alquiler Seguro, Tecnocasa, and Redpiso every 180 seconds
+    ├── polls Alquiler Seguro, Tecnocasa, Redpiso, and Nestar every 180 seconds
     ├── accepts user-owned search profiles over HTTPS
     ├── sends eligible new listings to Telegram
     └── reads/writes /data/rentals.sqlite3
@@ -72,7 +72,7 @@ The first successful worker cycle performs these operations in order:
 1. Creates the SQLite schema on the persistent volume.
 2. Imports the private user, renter, pet, and search profile.
 3. Polls Telegram account-link commands when `TELEGRAM_BOT_USERNAME` is configured.
-4. Discovers current Alquiler Seguro, Tecnocasa, and Redpiso inventory from their published sitemaps.
+4. Discovers current Alquiler Seguro, Tecnocasa, Redpiso, and Nestar inventory from their published sitemaps.
 5. Records every current listing id as a separate no-alert baseline for each source.
 6. Writes a `baseline_created` event to the Railway logs and sends zero property alerts.
 

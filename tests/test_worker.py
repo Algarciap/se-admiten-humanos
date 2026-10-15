@@ -13,6 +13,7 @@ from se_admiten_humanos.worker import (
     WorkerConfigurationError,
     WorkerCycleResult,
     WorkerSettings,
+    default_website_sources,
     run_worker,
     run_worker_cycle,
     run_worker_sources_cycle,
@@ -41,6 +42,14 @@ class MutableSource:
             municipality="Madrid",
             description="Se admiten mascotas.",
             url=discovery.url,
+        )
+
+
+class DefaultSourceTests(unittest.TestCase):
+    def test_hosted_worker_enables_every_implemented_source(self):
+        self.assertEqual(
+            [source.source_id for source in default_website_sources()],
+            ["alquiler_seguro", "tecnocasa", "redpiso", "nestar"],
         )
 
 

@@ -13,6 +13,7 @@ from typing import Protocol
 
 from .acquisition import AcquisitionResult, AcquisitionRunner, Notifier
 from .alquiler_seguro import AlquilerSeguroSource
+from .nestar import NestarSource
 from .persistence import RentalStore
 from .profile_config import ProfileBundle, load_profile_bundle_json
 from .redpiso import RedpisoSource
@@ -135,7 +136,12 @@ class WorkerBatchResult:
 def default_website_sources() -> tuple[WebsiteSource, ...]:
     """Return enabled first-party sources in a stable operational order."""
 
-    return (AlquilerSeguroSource(), TecnocasaSource(), RedpisoSource())
+    return (
+        AlquilerSeguroSource(),
+        TecnocasaSource(),
+        RedpisoSource(),
+        NestarSource(),
+    )
 
 
 def _poll_telegram_links(

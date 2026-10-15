@@ -19,12 +19,13 @@ first-party Madrid inventory:
 | Agencia Negociadora del Alquiler | Madrid rental specialist | Agency site plus its portal profile | Confirm per property |
 | Tecnocasa | Large local-office network | Published compressed property sitemaps plus unseen public details | Confirm per property |
 | Redpiso | Large Madrid network | Published property sitemap plus unseen public details | Confirm per property |
+| Nestar | First-party landlord | Published property sitemap plus unseen public details | Confirm per property |
 | Gilmar | Dedicated Madrid rental office | Saved search/direct email | Confirm per property |
 | Engel & Völkers | Hundreds of Madrid rentals | Native saved-search alert | Description |
 
 ## Second wave
 
-- Nestar, Fidere/Encaja tu alquiler, and Avalon/Plan Vive for direct or affordable portfolios.
+- Fidere/Encaja tu alquiler and Avalon/Plan Vive for direct or affordable portfolios.
 - RE/MAX, aProperties, and Vivienda2 for agency-owned inventory.
 - Habitaclia and Indomio for incremental portal coverage.
 - Plan Alquila as a parallel public route.
@@ -62,6 +63,9 @@ users, but no Fotocasa alert or parser is enabled.
 - Redpiso publishes a property sitemap and schema.org listing data. The adapter keeps residential
   long-term and temporary Madrid-region rentals; each user's duration, municipality, and budget
   filters are applied later.
+- Nestar publishes property details in a first-party sitemap and server-rendered Next.js data. The
+  adapter distinguishes rentals from sales, fetches only unseen details, and applies user filters
+  downstream.
 - Wolo exposes an `Acepta mascotas` filter and states accepted, rejected, or pending pet status in
   individual listings. It also supports direct visit booking, making it a high-priority manual source.
 - Testa Homes exposes an `Acepta mascotas` characteristic in its first-party inventory.
@@ -94,3 +98,27 @@ but a background adapter also waits for written permission.
 [Wolo's current legal notice](https://www.wolorent.com/aviso-legal) requires prior written
 authorization for reproduction or reuse of its site content. Its first-party search and pet filter
 remain valuable for manual use, but a recurring parser must wait for written permission.
+
+## Permission requests for restricted sources
+
+The project is free, open source, non-commercial, rate-limited, and sends users back to the original
+advert. Before enabling Testa Homes, Vivenio, or Wolo, request written permission to:
+
+- poll public rental inventory no more often than every three minutes;
+- retain only listing identity and normalized matching fields;
+- show a short evidence phrase and deep link in a private Telegram alert;
+- avoid images, authentication, private APIs, CAPTCHAs, and contact automation;
+- identify the bot with the public repository URL and stop promptly on request.
+
+Suggested Spanish request:
+
+> Estamos desarrollando “Se admiten humanos”, un proyecto gratuito, abierto y sin ánimo de lucro que
+> ayuda a personas a encontrar vivienda compatible con sus animales. Solicitamos autorización escrita
+> para consultar de forma limitada el inventario público, como máximo cada tres minutos, y enviar a
+> cada usuario únicamente coincidencias con un enlace al anuncio original. No copiaríamos imágenes,
+> no accederíamos a zonas privadas ni automatizaríamos contactos o reservas. ¿Podrían autorizarnos e
+> indicarnos el método técnico y los límites que prefieren?
+
+Agencia Negociadora del Alquiler does not currently publish individual inventory on its own public
+site. Its portal stock should be covered by the official Idealista API when credentials are approved;
+Fotocasa parsing remains excluded by product choice.

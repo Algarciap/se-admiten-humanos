@@ -93,7 +93,7 @@ personal WhatsApp accounts, or send messages through unsupported portal APIs.
   run limits, and explicit `succeeded`, `empty`, and `failed` outcomes.
 - Credential-gated Idealista Search API adapter with OAuth, conservative pagination, strict response
   validation, and automatic maximum-price selection from enabled user searches.
-- Baseline-safe, multi-source website watcher with live Alquiler Seguro, Tecnocasa, and Redpiso
+- Baseline-safe, multi-source website watcher with live Alquiler Seguro, Tecnocasa, Redpiso, and Nestar
   adapters. Each uses a published sitemap for discovery and fetches detail pages only for unseen
   listing IDs; one broken parser cannot prevent the other sources from running.
 - Machine-readable registry of portals, agencies, institutional landlords, and public housing sources.
@@ -103,8 +103,8 @@ personal WhatsApp accounts, or send messages through unsupported portal APIs.
   retries, and an actionable listing button; different budgets route to different private chats.
 - Railway-ready background worker with safe first-boot profile import, no-alert website baseline,
   three-minute polling, persistent SQLite state, and visible repeated-failure exits.
-- Idealista API access and quota confirmation remain pending. Wolo remains in the registry but its
-  background parser is disabled until written permission is obtained. Fotocasa is deliberately
+- Idealista API access and quota confirmation remain pending. Wolo, Testa Homes, and Vivenio remain
+  in the registry but their background parsers are disabled until written permission is obtained. Fotocasa is deliberately
   excluded from the initial deployment.
 
 ## Run locally
@@ -161,7 +161,7 @@ known. See [`docs/idealista-api.md`](docs/idealista-api.md) before enabling it; 
 fall back to scraping Idealista pages.
 
 The hosted worker uses published sitemaps for lightweight discovery on Alquiler Seguro, Tecnocasa,
-and Redpiso, then requests public detail pages only for new IDs. Each source receives its own
+Redpiso, and Nestar, then requests public detail pages only for new IDs. Each source receives its own
 no-alert baseline, preventing a first-run flood. Empty or structurally changed pages fail visibly,
 while the other sources still complete their checks. The separate Alquiler Seguro CLI remains useful
 for local diagnostics. See
@@ -175,7 +175,7 @@ and it does not require a personal computer to remain on. SQLite is appropriate 
 worker, but the service must remain at one replica and the database must live on the mounted volume.
 
 On a brand-new database, the worker imports the private profile from a sealed environment variable
-and creates independent Alquiler Seguro, Tecnocasa, and Redpiso baselines. That first cycle sends
+and creates independent Alquiler Seguro, Tecnocasa, Redpiso, and Nestar baselines. That first cycle sends
 zero messages. Later cycles process only newly discovered listing IDs through the normal classifier,
 matching, deduplication, and Telegram pipeline. Configuration errors stop immediately; transient
 failures are logged and the process exits after three consecutive failures so Railway can restart it

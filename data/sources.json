@@ -199,13 +199,13 @@
     "base_url": "https://www.nestarhomes.es/",
     "search_url": "https://www.nestarhomes.es/",
     "coverage": "Madrid city and region",
-    "acquisition": "direct_inventory_and_contact",
-    "automation_status": "manual_watch_until_permission",
+    "acquisition": "published_sitemap_and_public_details",
+    "automation_status": "adapter_ready_baseline_required",
     "pet_signal": "unknown_requires_confirmation",
     "direct_contact": "site_contact",
     "evidence_url": "https://www.nestarhomes.es/",
-    "notes": "Large direct landlord with online rental inventory; obtain a written two-cat policy confirmation.",
-    "verified_on": "2026-10-13"
+    "notes": "The live adapter reads Nestar's published property sitemap, fetches only unseen public detail pages, distinguishes rentals from sales, and leaves pet acceptance to listing evidence or direct confirmation.",
+    "verified_on": "2026-10-15"
   },
   {
     "id": "fidere",
