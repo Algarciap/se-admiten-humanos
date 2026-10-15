@@ -94,6 +94,8 @@ class WebTests(unittest.TestCase):
 
         self.assertEqual(status, "200 OK")
         self.assertIn("Tu búsqueda está lista", page)
+        self.assertIn('aria-label="Búsqueda guardada">Guardada</span>', page)
+        self.assertNotIn("Búsqueda guardada</span>", page)
         self.assertIn("https://t.me/SeAdmitenHumanosBot?start=", page)
         session = self.response_cookies(headers)["humanos_session"]
         with RentalStore(self.database) as store:
@@ -181,6 +183,9 @@ class WebTests(unittest.TestCase):
         )
         self.assertIn("legend+.grid{clear:both}", page)
         self.assertIn("input[type=date]{min-width:0;max-width:100%}", page)
+        self.assertIn('class="date-field"', page)
+        self.assertIn("-webkit-text-size-adjust:100%", page)
+        self.assertIn("-webkit-appearance:none;appearance:none", page)
         self.assertIn(
             "header{align-items:center;gap:10px;padding:20px 16px}", page
         )
