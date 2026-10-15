@@ -16,7 +16,7 @@ from .models import Listing, Pet, PetDecision, PropertyType, RentalDuration, Ren
 from .search_profile import SearchDecision, SearchProfile
 
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 _TELEGRAM_CHAT_ID = re.compile(r"-?[1-9][0-9]*")
 
@@ -262,6 +262,19 @@ class RentalStore:
                 commit;
             """)
             version = 12
+        if version == 12:
+            columns = {
+                str(row[1])
+                for row in self.connection.execute("pragma table_info(renter_profiles)")
+            }
+            with self.connection:
+                if "household_size" not in columns:
+                    self.connection.execute(
+                        "alter table renter_profiles add column household_size "
+                        "integer not null default 1 check (household_size between 1 and 10)"
+                    )
+                self.connection.execute("pragma user_version = 13")
+            version = 13
         if version != SCHEMA_VERSION:
             raise RuntimeError(
                 f"Unsupported database schema version {version}; expected {SCHEMA_VERSION}"
@@ -1337,14 +1350,15 @@ class RentalStore:
                 """
                 insert into renter_profiles (
                     id, user_id, label, sender_name, renter_name, monthly_income_eur,
-                    job, contract_type, created_at, updated_at
-                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    household_size, job, contract_type, created_at, updated_at
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict(id) do update set
                     user_id = excluded.user_id,
                     label = excluded.label,
                     sender_name = excluded.sender_name,
                     renter_name = excluded.renter_name,
                     monthly_income_eur = excluded.monthly_income_eur,
+                    household_size = excluded.household_size,
                     job = excluded.job,
                     contract_type = excluded.contract_type,
                     updated_at = excluded.updated_at
@@ -1356,6 +1370,7 @@ class RentalStore:
                     profile.sender_name,
                     profile.renter_name,
                     profile.monthly_income_eur,
+                    profile.household_size,
                     profile.job,
                     profile.contract_type,
                     now,
@@ -1389,7 +1404,7 @@ class RentalStore:
         row = self.connection.execute(
             """
             select id, user_id, label, sender_name, renter_name,
-                   monthly_income_eur, job, contract_type
+                   monthly_income_eur, household_size, job, contract_type
             from renter_profiles
             where user_id = ?
             order by created_at, id
@@ -1415,8 +1430,9 @@ class RentalStore:
             sender_name=str(row[3]),
             renter_name=str(row[4]),
             monthly_income_eur=(int(row[5]) if row[5] is not None else None),
-            job=str(row[6]),
-            contract_type=str(row[7]),
+            household_size=int(row[6]),
+            job=str(row[7]),
+            contract_type=str(row[8]),
             pets=tuple(
                 Pet(
                     id=str(pet[0]),

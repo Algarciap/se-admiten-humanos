@@ -12,6 +12,7 @@
       "sender_name": "Sender name",
       "renter_name": "Renter name",
       "monthly_income_eur": null,
+      "household_size": 1,
       "job": "",
       "contract_type": "",
       "pets": [

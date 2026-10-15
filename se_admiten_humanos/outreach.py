@@ -57,9 +57,19 @@ def build_message(
         if profile.monthly_income_eur is not None
         else ""
     )
-    living_arrangement = (
-        f"Viviría con {pets}." if profile.pets else "No viviría con mascotas."
+    household = (
+        "Viviría una persona en la vivienda."
+        if profile.household_size == 1
+        else f"Vivirían {profile.household_size} personas en la vivienda."
     )
+    if profile.household_size == 1:
+        living_arrangement = household + (
+            f" Viviría con {pets}." if profile.pets else " No viviría con mascotas."
+        )
+    else:
+        living_arrangement = household + (
+            f" Convivirían con {pets}." if profile.pets else " No vivirían con mascotas."
+        )
     renter_summary = f"{employment}{income}. {living_arrangement}".strip()
 
     if pet_decision.status is PetStatus.ACCEPTED or not profile.pets:

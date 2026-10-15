@@ -63,6 +63,7 @@ class WebTests(unittest.TestCase):
             "email": "ana@example.com",
             "renter_name": "Ana",
             "sender_name": "Ana",
+            "household_size": "2",
             "max_rent_eur": "1100",
             "urgent": "on",
             "stretch_max_rent_eur": "1200",
@@ -109,6 +110,7 @@ class WebTests(unittest.TestCase):
             self.assertEqual(profiles[0].acceptable_districts, ("Centro", "Chamberí"))
             self.assertTrue(profiles[0].requires_pet_acceptance)
             self.assertEqual(len(profiles[0].accepted_rental_durations), 2)
+            self.assertEqual(store.load_primary_renter_profile(profiles[0].user_id).household_size, 2)
             token_count = store.connection.execute(
                 "select count(*) from telegram_link_tokens"
             ).fetchone()[0]
@@ -230,11 +232,14 @@ class WebTests(unittest.TestCase):
         self.assertIn("<h3>Tipo</h3>", page)
         self.assertIn("<h3>Flexibilidad</h3>", page)
         self.assertNotIn('class="checks"', page)
-        self.assertIn("Presupuesto preferido al mes (€)", page)
-        self.assertNotIn("Presupuesto preferido al mes <span>€</span>", page)
-        self.assertIn("fieldset{padding:0 0 22px}", page)
+        self.assertIn("Presupuesto mensual (€)", page)
+        self.assertIn("Número mínimo de dormitorios", page)
+        self.assertIn('class="form-progress"', page)
+        self.assertIn('class="district-picker"', page)
+        self.assertIn('name="household_size"', page)
+        self.assertIn(".wizard-step{padding:32px 0 36px}", page)
         self.assertIn(
-            "legend{float:left;width:100%;padding:0;margin:0 0 10px}", page
+            ".wizard-step legend{margin-bottom:18px}", page
         )
         self.assertIn("legend+.grid{clear:both}", page)
         self.assertIn("input[type=date]{min-width:0;max-width:100%}", page)

@@ -40,6 +40,20 @@ class OutreachTests(unittest.TestCase):
         self.assertIn("Hemos visto que la vivienda admite mascotas", message)
         self.assertIn("concertar una visita", message)
 
+    def test_household_size_is_clear_in_outreach(self) -> None:
+        profile = RenterProfile(
+            id="renter-couple",
+            user_id="user-couple",
+            label="Pareja",
+            sender_name="Ana",
+            renter_name="Ana y Luis",
+            household_size=2,
+        )
+
+        message = build_message(self.listing, classify(""), profile)
+
+        self.assertIn("Vivirían 2 personas en la vivienda", message)
+
     def test_subject_contains_listing_reference(self) -> None:
         self.assertEqual(
             subject(self.listing),

@@ -30,6 +30,12 @@ _CSRF_COOKIE = "humanos_csrf"
 _STATUS_COOKIE = "humanos_status"
 _STATUS_SESSION_SECONDS = 8 * 60 * 60
 _MAX_BODY_BYTES = 65_536
+_MADRID_DISTRICTS = (
+    "Arganzuela", "Barajas", "Carabanchel", "Centro", "Chamartín", "Chamberí",
+    "Ciudad Lineal", "Fuencarral-El Pardo", "Hortaleza", "Latina", "Moncloa-Aravaca",
+    "Moratalaz", "Puente de Vallecas", "Retiro", "Salamanca", "San Blas-Canillejas",
+    "Tetuán", "Usera", "Vicálvaro", "Villa de Vallecas", "Villaverde",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +85,13 @@ class WebApplication:
                     "200 OK",
                     json.dumps({"status": "ok"}),
                     content_type="application/json; charset=utf-8",
+                )
+            if path == "/form.js" and method == "GET":
+                return self._respond(
+                    start_response,
+                    "200 OK",
+                    _FORM_JS,
+                    content_type="application/javascript; charset=utf-8",
                 )
             if path == "/status" and method == "GET":
                 if not self.settings.status_page_token:
@@ -258,6 +271,9 @@ class WebApplication:
             )
         min_bedrooms = _integer(form, "preferred_min_bedrooms", "Dormitorios", 0, 10)
         income = _optional_integer(form, "monthly_income_eur", "Nómina", 1, 100_000)
+        household_size = _integer(
+            form, "household_size", "Número de personas", 1, 10
+        )
         pet_count = _optional_integer(
             form, "pet_count", "Número de animales", 0, 10
         ) or 0
@@ -317,6 +333,7 @@ class WebApplication:
             sender_name=sender_name,
             renter_name=renter_name,
             monthly_income_eur=income,
+            household_size=household_size,
             job=form.get("job", "").strip()[:160],
             contract_type=form.get("contract_type", "").strip()[:120],
             pets=pets,
@@ -431,10 +448,15 @@ def _read_form(environ: Mapping[str, object]) -> tuple[dict[str, str], str]:
         return {}, "No se pudo leer el formulario."
     try:
         payload = stream.read(length).decode("utf-8", errors="strict")
-        values = parse_qs(payload, keep_blank_values=True, max_num_fields=40)
+        values = parse_qs(payload, keep_blank_values=True, max_num_fields=80)
     except (UnicodeDecodeError, ValueError):
         return {}, "El formulario contiene datos que no se pueden procesar."
-    return {key: items[-1] for key, items in values.items()}, ""
+    form = {key: items[-1] for key, items in values.items()}
+    if "acceptable_districts" in values:
+        form["acceptable_districts"] = ", ".join(
+            item for item in values["acceptable_districts"] if item
+        )
+    return form, ""
 
 
 def _valid_csrf(form: Mapping[str, str], cookies: Mapping[str, str]) -> bool:
@@ -545,6 +567,7 @@ def _profile_page(
                 "renter_name": renter.renter_name,
                 "sender_name": renter.sender_name,
                 "monthly_income_eur": renter.monthly_income_eur or "",
+                "household_size": renter.household_size,
                 "job": renter.job,
                 "contract_type": renter.contract_type,
                 "pet_count": pet.count if pet else "",
@@ -579,6 +602,18 @@ def _profile_page(
     property_type_home = form.get("property_type_home", "") == "on"
     property_type_room = form.get("property_type_room", "") == "on"
     urgent = form.get("urgent", "") == "on"
+    selected_districts = {
+        item.strip() for item in str(form.get("acceptable_districts", "")).split(",")
+        if item.strip()
+    }
+    district_options = "".join(
+        f'<label><input type="checkbox" name="acceptable_districts" value="{html.escape(district, quote=True)}"{_checked(district in selected_districts)}><span>{html.escape(district)}</span></label>'
+        for district in _MADRID_DISTRICTS
+    )
+    district_summary = (
+        ", ".join(sorted(selected_districts))
+        if selected_districts else "Cualquier distrito de Madrid"
+    )
     error_html = f'<div class="error" role="alert">{html.escape(error)}</div>' if error else ""
     session_note = ("Revisa tu búsqueda y cambia lo que necesites." if accounts_enabled else "Revisa tu búsqueda y cambia lo que necesites. Esta sesión está vinculada a este navegador.") if user else "Define tus criterios. Al terminar podrás conectar Telegram para recibir avisos."
     body = f"""
@@ -586,41 +621,43 @@ def _profile_page(
     <main>
       <section class="hero"><p class="eyebrow">Alertas de alquiler que van al grano</p><h1>Encontrar casa ya es bastante difícil.</h1><p class="lede">Cuéntanos qué buscas. Revisamos anuncios nuevos, aplicamos tus criterios y te avisamos por Telegram para que puedas reaccionar a tiempo.</p><div class="promise"><span>Tus criterios, tu búsqueda</span><span>Sin anuncios duplicados</span><span>Sin vender tus datos</span></div></section>
       <section class="panel"><div class="panel-head"><p class="step">Tu búsqueda</p><h2>{'Actualiza tus datos' if user else 'Cuéntanos qué necesitas'}</h2><p>{html.escape(session_note)}</p></div>{error_html}
-      <form method="post" action="/profile"><input type="hidden" name="csrf_token" value="{html.escape(csrf, quote=True)}">
-        <fieldset><legend>1 · Presupuesto y zona</legend><div class="grid">
-          <label>Presupuesto preferido al mes (€)<input required type="number" min="300" max="10000" name="max_rent_eur" value="{_value(form, 'max_rent_eur')}"></label>
-          <label>Máximo excepcional (€)<small>Opcional; solo se usa en modo urgente.</small><input type="number" min="300" max="10000" name="stretch_max_rent_eur" value="{_value(form, 'stretch_max_rent_eur')}" placeholder="Ej. 1000"></label>
-          <label>Dormitorios preferidos<input required type="number" min="0" max="10" name="preferred_min_bedrooms" value="{_value(form, 'preferred_min_bedrooms')}"></label>
-          <label class="wide">Distritos aceptables <small>Déjalo vacío para todo Madrid; separa varios con comas.</small><input name="acceptable_districts" value="{_value(form, 'acceptable_districts')}" placeholder="Centro, Chamberí, Retiro…"></label>
-          <label>Mobiliario<select name="furnished"><option value="any"{' selected' if furnished == 'any' else ''}>Me da igual</option><option value="yes"{' selected' if furnished == 'yes' else ''}>Amueblado</option><option value="no"{' selected' if furnished == 'no' else ''}>Sin amueblar</option></select></label>
-          <label>Tipo de alquiler<select required name="rental_duration"><option value="" disabled{' selected' if not rental_duration else ''}>Elige una opción</option><option value="long_term"{' selected' if rental_duration == 'long_term' else ''}>Larga duración</option><option value="temporary"{' selected' if rental_duration == 'temporary' else ''}>Temporal / por temporada</option><option value="both"{' selected' if rental_duration == 'both' else ''}>Ambos</option></select></label>
-          <label class="date-field">Fecha límite de entrada <small>Opcional</small><input type="date" name="move_in_by" value="{_value(form, 'move_in_by')}"></label>
+      <form method="post" action="/profile" data-wizard><input type="hidden" name="csrf_token" value="{html.escape(csrf, quote=True)}">
+        <p class="required-note"><span aria-hidden="true">*</span> Campos obligatorios</p>
+        <ol class="form-progress" aria-label="Progreso del formulario"><li><button type="button" data-step-button="0" aria-current="step"><span>1</span> Búsqueda</button></li><li><button type="button" data-step-button="1"><span>2</span> Personas</button></li><li><button type="button" data-step-button="2"><span>3</span> Animales</button></li></ol>
+        <fieldset class="wizard-step" data-step="0"><legend>1 · Presupuesto y zona</legend><div class="grid">
+          <label>Presupuesto mensual (€) <span class="required" aria-hidden="true">*</span><small>La cantidad que quieres pagar habitualmente.</small><input required type="number" min="300" max="10000" name="max_rent_eur" value="{_value(form, 'max_rent_eur')}"></label>
+          <label>Máximo excepcional (€) <small>Opcional · solo se usa en modo urgente.</small><input type="number" min="300" max="10000" name="stretch_max_rent_eur" value="{_value(form, 'stretch_max_rent_eur')}" placeholder="Ej. 1000"></label>
+          <label>Número mínimo de dormitorios <span class="required" aria-hidden="true">*</span><input required type="number" min="0" max="10" name="preferred_min_bedrooms" value="{_value(form, 'preferred_min_bedrooms')}"></label>
+          <div class="wide field-group"><span class="field-label">Distritos <small>Opcional · sin selección buscaremos en todo Madrid.</small></span><details class="district-picker"><summary data-district-summary>{html.escape(district_summary)}</summary><div class="district-options">{district_options}</div></details></div>
+          <label>Mobiliario <small>Opcional</small><select name="furnished"><option value="any"{' selected' if furnished == 'any' else ''}>Me da igual</option><option value="yes"{' selected' if furnished == 'yes' else ''}>Amueblado</option><option value="no"{' selected' if furnished == 'no' else ''}>Sin amueblar</option></select></label>
+          <label>Tipo de alquiler <span class="required" aria-hidden="true">*</span><select required name="rental_duration"><option value="" disabled{' selected' if not rental_duration else ''}>Elige una opción</option><option value="long_term"{' selected' if rental_duration == 'long_term' else ''}>Larga duración</option><option value="temporary"{' selected' if rental_duration == 'temporary' else ''}>Temporal / por temporada</option><option value="both"{' selected' if rental_duration == 'both' else ''}>Ambos</option></select></label>
+          <label class="date-field">Fecha límite para mudarte <small>Opcional</small><input type="date" name="move_in_by" value="{_value(form, 'move_in_by')}"></label>
         </div><div class="option-groups">
           <section class="option-group"><h3>Urgencia</h3><div class="option-list"><label><input type="checkbox" name="urgent"{_checked(urgent)}><span>Avisarme también de oportunidades hasta mi máximo excepcional</span></label></div></section>
           <section class="option-group"><h3>Tipo</h3><div class="option-list"><label><input type="checkbox" name="property_type_home"{_checked(property_type_home)}><span>Vivienda completa</span></label><label><input type="checkbox" name="property_type_room"{_checked(property_type_room)}><span>Habitación</span></label></div></section>
           <section class="option-group"><h3>Flexibilidad</h3><div class="option-list"><label><input type="checkbox" name="allow_studios"{_checked(studios)}><span>Incluir estudios</span></label><label><input type="checkbox" name="allow_unknown_bedrooms"{_checked(unknown)}><span>Incluir anuncios sin dormitorios indicados</span></label><label><input type="checkbox" name="move_in_asap"{_checked(asap)}><span>Necesito entrar cuanto antes</span></label></div></section>
-        </div><small class="option-note">Las sugerencias urgentes se etiquetan claramente y nunca superan tu máximo excepcional. Garajes y locales comerciales se excluyen siempre.</small></fieldset>
-        <fieldset><legend>2 · Tú y tu situación</legend><div class="grid">
-          <label>Tu nombre<input required maxlength="100" name="display_name" value="{_value(form, 'display_name')}"></label>
-          {('<p>Gestiona tu correo verificado en <a href="/account">Mi cuenta</a>.</p>' if accounts_enabled else f'<label>Correo <small>Opcional; aún no enviamos emails.</small><input type="email" maxlength="254" name="email" value="{_value(form, "email")}"></label>')}
-          <label>Nombre de la persona inquilina<input required maxlength="100" name="renter_name" value="{_value(form, 'renter_name')}"></label>
-          <label>Nombre para contactar a la agencia<input required maxlength="100" name="sender_name" value="{_value(form, 'sender_name')}"></label>
-          <label>Nómina mensual (€)<input type="number" min="1" max="100000" name="monthly_income_eur" value="{_value(form, 'monthly_income_eur')}"></label>
-          <label>Trabajo<input maxlength="160" name="job" value="{_value(form, 'job')}" placeholder="Stage manager, docente…"></label>
-          <label class="wide">Tipo de contrato<input maxlength="120" name="contract_type" value="{_value(form, 'contract_type')}" placeholder="Indefinido, autónomo…"></label>
-        </div></fieldset>
-        <fieldset><legend>3 · Animales <span class="optional">Opcional</span></legend><p class="section-intro">Si convivirán contigo, los tendremos en cuenta al revisar cada anuncio.</p><div class="grid">
-          <label>¿Cuántos vivirían contigo?<input type="number" min="0" max="10" name="pet_count" value="{_value(form, 'pet_count')}"></label>
-          <label>¿Qué animales son?<input maxlength="80" name="pet_species" value="{_value(form, 'pet_species')}" placeholder="Gato, perro…"></label>
+        </div><small class="option-note">Las sugerencias urgentes se etiquetan claramente y nunca superan tu máximo excepcional. Garajes y locales comerciales se excluyen siempre.</small><div class="wizard-nav wizard-nav-end"><button class="primary next-step" type="button" data-next>Continuar →</button></div></fieldset>
+        <fieldset class="wizard-step" data-step="1"><legend>2 · Personas y situación</legend><div class="grid">
+          <label>Tu nombre <span class="required" aria-hidden="true">*</span><input required maxlength="100" name="display_name" value="{_value(form, 'display_name')}"></label>
+          {('<p class="account-note">Gestiona tu correo verificado en <a href="/account">Mi cuenta</a>.</p>' if accounts_enabled else f'<label>Correo <small>Opcional · aún no enviamos emails.</small><input type="email" maxlength="254" name="email" value="{_value(form, "email")}"></label>')}
+          <label>Personas que vivirán en la vivienda <span class="required" aria-hidden="true">*</span><input required type="number" min="1" max="10" name="household_size" value="{_value(form, 'household_size', 1)}"></label>
+          <label>Nombre de la persona o personas inquilinas <span class="required" aria-hidden="true">*</span><input required maxlength="100" name="renter_name" value="{_value(form, 'renter_name')}" placeholder="Ej. Ana y Luis"></label>
+          <label>Nombre para contactar a la agencia <span class="required" aria-hidden="true">*</span><input required maxlength="100" name="sender_name" value="{_value(form, 'sender_name')}"></label>
+          <label>Ingresos mensuales (€) <small>Opcional</small><input type="number" min="1" max="100000" name="monthly_income_eur" value="{_value(form, 'monthly_income_eur')}"></label>
+          <label>Trabajo <small>Opcional</small><input maxlength="160" name="job" value="{_value(form, 'job')}" placeholder="Stage manager, docente…"></label>
+          <label>Tipo de contrato <small>Opcional</small><input maxlength="120" name="contract_type" value="{_value(form, 'contract_type')}" placeholder="Indefinido, autónomo…"></label>
+        </div><div class="wizard-nav"><button class="secondary-step" type="button" data-back>← Atrás</button><button class="primary next-step" type="button" data-next>Continuar →</button></div></fieldset>
+        <fieldset class="wizard-step" data-step="2"><legend>3 · Animales <span class="optional">Opcional</span></legend><p class="section-intro">Si convivirán contigo, los tendremos en cuenta al revisar cada anuncio.</p><div class="grid">
+          <label>¿Cuántos animales vivirán contigo? <small>Opcional</small><input type="number" min="0" max="10" name="pet_count" value="{_value(form, 'pet_count')}"></label>
+          <label>¿Qué animales son? <small>Opcional</small><input maxlength="80" name="pet_species" value="{_value(form, 'pet_species')}" placeholder="Gato, perro…"></label>
           <label class="wide">Algo útil sobre ellos <small>Opcional</small><textarea maxlength="300" name="pet_notes" placeholder="Edad, tamaño, comportamiento…">{_value(form, 'pet_notes')}</textarea></label>
-        </div></fieldset>
-        <button class="primary" type="submit">Guardar y conectar Telegram →</button>
+        </div><div class="wizard-nav"><button class="secondary-step" type="button" data-back>← Atrás</button><button class="primary" type="submit">Guardar y conectar Telegram →</button></div></fieldset>
       </form>
       {'<p><a href="/account">Mi cuenta · avisos, acceso y datos</a></p>' if accounts_enabled else ''}
       {f'<form method="post" action="/logout" class="logout"><input type="hidden" name="csrf_token" value="{html.escape(csrf, quote=True)}"><button type="submit">Cerrar sesión en este navegador</button></form>' if user else ''}
       </section>
       <section class="how"><p class="eyebrow">Cómo funciona</p><h2>Rápido, pero honesto.</h2><div class="cards"><article><b>01</b><h3>Buscamos</h3><p>Consultamos fuentes autorizadas y webs de agencias con controles para detectar cambios.</p></article><article><b>02</b><h3>Filtramos</h3><p>Aplicamos presupuesto, zona, tipo de alquiler y demás preferencias sin inventar información que el anuncio no da.</p></article><article><b>03</b><h3>Te avisamos</h3><p>Recibes el anuncio y la evidencia en Telegram para abrirlo y responder en dos toques.</p></article></div></section>
-    </main>"""
+    </main><script src="/form.js" defer></script>"""
     return _layout("Tu búsqueda · Se admiten humanos", body)
 
 
@@ -711,6 +748,65 @@ def _layout(title: str, body: str) -> str:
     return f"""<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{html.escape(title)}</title><meta name="description" content="Alertas gratuitas y open source para encontrar alquiler antes y con menos ruido."><style>{_CSS}</style></head><body>{body}<footer><p>Hecho para ayudar, no para ganar dinero. <a href="https://github.com/Algarciap/se-admiten-humanos">Código libre y abierto</a>.</p><p>Tus preferencias mandan; no inventamos información que el anuncio no da.</p></footer></body></html>"""
 
 
+_FORM_JS = """
+(() => {
+  const form = document.querySelector('[data-wizard]');
+  if (!form) return;
+  const steps = [...form.querySelectorAll('[data-step]')];
+  const stepButtons = [...form.querySelectorAll('[data-step-button]')];
+  let current = 0;
+
+  const valid = (step) => {
+    const invalid = [...step.querySelectorAll('input, select, textarea')]
+      .find((control) => !control.checkValidity());
+    if (invalid) invalid.reportValidity();
+    return !invalid;
+  };
+  const show = (index, focus = false) => {
+    current = Math.max(0, Math.min(index, steps.length - 1));
+    steps.forEach((step, position) => { step.hidden = position !== current; });
+    stepButtons.forEach((button, position) => {
+      if (position === current) button.setAttribute('aria-current', 'step');
+      else button.removeAttribute('aria-current');
+    });
+    if (focus) form.scrollIntoView({behavior: 'smooth', block: 'start'});
+  };
+
+  form.classList.add('wizard-ready');
+  show(0);
+  form.addEventListener('click', (event) => {
+    const next = event.target.closest('[data-next]');
+    const back = event.target.closest('[data-back]');
+    const jump = event.target.closest('[data-step-button]');
+    if (next && valid(steps[current])) show(current + 1, true);
+    if (back) show(current - 1, true);
+    if (jump) {
+      const target = Number(jump.dataset.stepButton);
+      if (target <= current || valid(steps[current])) show(target, true);
+    }
+  });
+  form.addEventListener('submit', (event) => {
+    const invalidStep = steps.findIndex((step) =>
+      [...step.querySelectorAll('input, select, textarea')].some((control) => !control.checkValidity())
+    );
+    if (invalidStep >= 0) {
+      event.preventDefault();
+      show(invalidStep, true);
+      valid(steps[invalidStep]);
+    }
+  });
+
+  const districtInputs = [...form.querySelectorAll('[name="acceptable_districts"]')];
+  const districtSummary = form.querySelector('[data-district-summary]');
+  const updateDistricts = () => {
+    const selected = districtInputs.filter((input) => input.checked).map((input) => input.value);
+    if (districtSummary) districtSummary.textContent = selected.length ? selected.join(', ') : 'Cualquier distrito de Madrid';
+  };
+  districtInputs.forEach((input) => input.addEventListener('change', updateDistricts));
+})();
+"""
+
+
 _CSS = """
 :root{--ink:#17231c;--paper:#f5f1e8;--card:#fffdf8;--green:#1f5c45;--lime:#d9ef9f;--coral:#ef765b;--line:#cfd5c9;--muted:#5d685f}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.5}header{max-width:1180px;margin:auto;padding:28px 24px;display:flex;align-items:center;justify-content:space-between}.brand{font-family:Georgia,serif;font-size:1.35rem;font-weight:700;color:var(--ink);text-decoration:none;white-space:nowrap}.brand span{font-size:1rem}.badge{flex:0 0 auto;background:var(--lime);padding:7px 12px;border-radius:999px;font-size:.78rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}main{max-width:1180px;margin:auto;padding:30px 24px 90px}.hero{max-width:880px;padding:72px 0 62px}.eyebrow,.step{text-transform:uppercase;letter-spacing:.13em;font-weight:900;font-size:.75rem;color:var(--green)}h1,h2,h3{font-family:Georgia,serif;line-height:1.04;margin:.25em 0}h1{font-size:clamp(3rem,8vw,6.7rem);letter-spacing:-.055em}.lede{font-size:clamp(1.1rem,2vw,1.4rem);max-width:760px;color:var(--muted)}.promise{display:flex;flex-wrap:wrap;gap:9px;margin-top:28px}.promise span{border:1px solid var(--ink);border-radius:999px;padding:7px 12px;font-size:.85rem}.panel{background:var(--card);border:1px solid var(--ink);box-shadow:9px 9px 0 var(--ink);padding:clamp(22px,5vw,54px)}.panel-head{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:end;border-bottom:1px solid var(--line);padding-bottom:28px}.panel-head h2,.how h2{font-size:clamp(2rem,5vw,4rem)}.panel-head>p{color:var(--muted);max-width:450px}fieldset{border:0;padding:38px 0;margin:0;border-bottom:1px solid var(--line)}legend{font-weight:900;font-size:1.05rem;margin-bottom:20px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;min-width:0}.wide{grid-column:1/-1}label{display:flex;flex-direction:column;gap:7px;min-width:0;font-size:.9rem;font-weight:750}label small,.success small{color:var(--muted);font-weight:400}input,select,textarea{width:100%;border:1px solid #99a298;background:#fff;padding:13px 14px;border-radius:4px;color:var(--ink);font:inherit}input[type=date]{min-width:0;max-width:100%}input:focus,select:focus,textarea:focus{outline:3px solid var(--lime);border-color:var(--green)}textarea{min-height:90px;resize:vertical}.checks{display:flex;flex-wrap:wrap;gap:18px;margin-top:22px}.checks label{flex-direction:row;align-items:center;font-weight:600}.checks input{width:auto}.primary,.button{display:inline-block;margin-top:30px;background:var(--green);color:white;border:1px solid var(--green);padding:15px 20px;border-radius:4px;font:inherit;font-weight:900;text-decoration:none;cursor:pointer}.primary:hover{background:#174534}.secondary{background:transparent;color:var(--ink);border:1px solid var(--ink)}.error{background:#ffe4dc;border-left:5px solid var(--coral);padding:14px 16px;margin:24px 0}.logout{margin-top:22px}.logout button{border:0;background:none;text-decoration:underline;color:var(--muted);cursor:pointer}.how{padding:110px 0 20px}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.cards article{border-top:2px solid var(--ink);padding-top:20px}.cards b{color:var(--coral)}.cards h3{font-size:1.7rem}.cards p{color:var(--muted)}.center{min-height:70vh;display:grid;place-items:center}.success{max-width:700px;text-align:center;background:var(--card);border:1px solid var(--ink);box-shadow:9px 9px 0 var(--ink);padding:clamp(30px,7vw,70px)}.success h1{font-size:clamp(2.8rem,7vw,5rem)}.success p{font-size:1.15rem;color:var(--muted)}.success .button{display:block;margin:28px auto 16px;max-width:340px}.success>a:last-child{display:block;margin-top:25px;color:var(--ink)}.success-mark{margin:auto;width:52px;height:52px;display:grid;place-items:center;border-radius:50%;background:var(--lime);font-size:1.7rem;font-weight:900}footer{border-top:1px solid var(--line);max-width:1180px;margin:auto;padding:35px 24px 60px;display:flex;justify-content:space-between;gap:30px;color:var(--muted);font-size:.85rem}footer a{color:var(--ink)}@media(max-width:720px){header{align-items:center;gap:10px;padding:20px 16px}.brand{font-size:clamp(.95rem,4.3vw,1.12rem)}.badge{padding:6px 9px;font-size:.56rem;letter-spacing:.035em}.hero{padding-top:38px}.panel-head,.grid,.cards{grid-template-columns:1fr}.wide{grid-column:auto}.panel{box-shadow:5px 5px 0 var(--ink)}footer{display:block}h1{font-size:3.25rem}}
 .panel{padding:clamp(22px,4vw,46px)}.panel-head{display:block;padding-bottom:22px}.panel-head>.step{color:var(--green);max-width:none;margin:0}.panel-head h2{font-size:clamp(2.2rem,5vw,3.7rem);margin:.18em 0}.panel-head>p:last-child{max-width:680px;margin:10px 0 0}fieldset{padding:0 0 22px}legend{float:left;width:100%;padding:0;margin:0 0 10px}.optional{margin-left:6px;color:var(--muted);font-size:.72rem;font-weight:500}.section-intro{clear:both;margin:0 0 12px;color:var(--muted);font-size:.86rem}legend+.grid{clear:both}.grid{gap:13px 18px}.grid>label{align-self:end}label{gap:5px}input,select,textarea{padding:10px 12px}textarea{min-height:78px}.option-groups{display:grid;grid-template-columns:1.25fr .8fr 1.25fr;gap:12px;margin-top:12px;align-items:start}.option-group{background:#fff;border:1px solid var(--line);border-radius:4px;padding:13px 14px}.option-group h3{font-family:inherit;font-size:.72rem;line-height:1.2;margin:0 0 10px;color:var(--green);text-transform:uppercase;letter-spacing:.1em}.option-list{display:grid;gap:9px}.option-list label{display:grid;grid-template-columns:17px minmax(0,1fr);gap:8px;align-items:start;font-weight:600;line-height:1.3}.option-list input{width:15px;height:15px;margin:2px 0 0;padding:0}.option-note{display:block;margin-top:11px;color:var(--muted);font-size:.8rem}.primary,.button{padding:13px 18px}@media(max-width:800px){.option-groups{grid-template-columns:1fr 1fr}.option-group:last-child{grid-column:1/-1}}@media(max-width:720px){.option-groups{grid-template-columns:1fr}.option-group:last-child{grid-column:auto}}
@@ -721,4 +817,6 @@ html{-webkit-text-size-adjust:100%;text-size-adjust:100%}.date-field{overflow:hi
 .account-header-link{color:var(--green);font-size:.86rem;font-weight:850;text-decoration:none;border:1px solid var(--green);border-radius:999px;padding:7px 12px}.account-header-link:hover{background:var(--lime)}.account-page .success>p:not(.eyebrow){color:var(--muted)}.account-page .success a{color:var(--green);font-weight:750;text-decoration-thickness:1px;text-underline-offset:3px}.account-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:24px}.account-actions .account-action{display:flex;align-items:center;justify-content:center;min-height:48px;border:1px solid var(--green);border-radius:4px;padding:11px 14px;text-align:center;text-decoration:none}.account-actions .account-action:hover{background:#edf5da}.account-actions .account-action-main{background:var(--lime);color:var(--ink);border-color:var(--ink);box-shadow:3px 3px 0 var(--ink)}
 @media(max-width:520px){.account-actions{grid-template-columns:1fr}.account-header-link{font-size:.75rem;padding:6px 9px}}
 @media(max-width:720px){.status-main{padding-top:24px}.status-main h1{font-size:2.7rem}.status-table-wrap{overflow:visible}.status-table-wrap table{min-width:0}.status-table-wrap thead{display:none}.status-table-wrap table,.status-table-wrap tbody,.status-table-wrap tr,.status-table-wrap th,.status-table-wrap td{display:block}.status-table-wrap tr{padding:15px 16px;border-bottom:1px solid var(--line)}.status-table-wrap tr:last-child{border-bottom:0}.status-table-wrap th,.status-table-wrap td{border:0;padding:4px 0}.status-table-wrap tbody th{font-size:1.35rem;margin-bottom:5px}.status-table-wrap td{display:grid;grid-template-columns:105px minmax(0,1fr);gap:10px}.status-table-wrap td:before{content:attr(data-label);color:var(--muted);font-size:.72rem;font-weight:850;text-transform:uppercase;letter-spacing:.05em}.status-table-wrap .detail{max-width:none}}
+.promise span{border:0;border-left:3px solid var(--coral);border-radius:0;padding:2px 10px;color:var(--muted);font-size:.8rem}.required-note{text-align:right;color:var(--muted);font-size:.78rem;margin:18px 0 0}.required{color:var(--coral);font-weight:900}.field-group{display:flex;flex-direction:column;gap:5px;font-size:.9rem;font-weight:750}.field-label{display:flex;flex-direction:column;gap:3px}.field-label small{color:var(--muted);font-weight:400}.form-progress{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;list-style:none;margin:20px 0 0;padding:0}.form-progress button{width:100%;border:0;border-top:2px solid var(--line);background:transparent;color:var(--muted);padding:10px 4px;text-align:left;font:inherit;font-size:.78rem;font-weight:800;cursor:pointer}.form-progress button span{display:inline-grid;place-items:center;width:23px;height:23px;margin-right:5px;border-radius:50%;background:var(--line);color:var(--ink)}.form-progress button[aria-current=step]{border-color:var(--green);color:var(--green)}.form-progress button[aria-current=step] span{background:var(--lime)}.wizard-ready .wizard-step[hidden]{display:none}.wizard-step{padding:32px 0 36px}.wizard-step legend{margin-bottom:18px}.wizard-nav{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:28px}.wizard-nav-end{justify-content:flex-end}.wizard-nav .primary{width:auto;margin:0}.secondary-step{border:1px solid var(--ink);border-radius:4px;background:transparent;color:var(--ink);padding:12px 18px;font:inherit;font-weight:850;cursor:pointer}.district-picker{position:relative;border:1px solid #99a298;border-radius:4px;background:#fff}.district-picker summary{min-height:45px;padding:10px 40px 10px 12px;cursor:pointer;font-weight:500;list-style:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.district-picker summary::-webkit-details-marker{display:none}.district-picker summary:after{content:'⌄';position:absolute;right:14px;top:9px;color:var(--green);font-size:1.2rem}.district-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;border-top:1px solid var(--line);background:var(--line);max-height:250px;overflow:auto}.district-options label{display:grid;grid-template-columns:18px minmax(0,1fr);align-items:start;gap:8px;background:#fff;padding:10px;font-size:.82rem;font-weight:600}.district-options input{width:16px;height:16px;margin:1px 0 0;padding:0}.account-note{align-self:end;margin:0 0 9px}
+@media(max-width:720px){.form-progress button{font-size:.68rem}.form-progress button span{display:grid;margin:0 0 4px}.district-options{grid-template-columns:1fr 1fr}.wizard-step{padding:28px 0 32px}.wizard-nav{align-items:stretch}.wizard-nav button{flex:1;padding-left:10px;padding-right:10px}}
 """

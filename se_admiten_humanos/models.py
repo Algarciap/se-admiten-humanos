@@ -129,6 +129,7 @@ class RenterProfile:
     sender_name: str
     renter_name: str
     monthly_income_eur: int | None = None
+    household_size: int = 1
     job: str = ""
     contract_type: str = ""
     pets: tuple[Pet, ...] = ()
@@ -146,6 +147,8 @@ class RenterProfile:
                 raise ValueError(f"{field_name} cannot be empty")
         if self.monthly_income_eur is not None and self.monthly_income_eur <= 0:
             raise ValueError("Monthly income must be greater than zero")
+        if not 1 <= self.household_size <= 10:
+            raise ValueError("Household size must be between one and ten")
         pet_ids = [pet.id for pet in self.pets]
         if len(pet_ids) != len(set(pet_ids)):
             raise ValueError("Pet ids must be unique within a renter profile")

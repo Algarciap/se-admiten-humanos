@@ -91,6 +91,7 @@ def _renter_profile(payload: Any) -> RenterProfile:
             if values.get("monthly_income_eur") is not None
             else None
         ),
+        household_size=int(values.get("household_size", 1)),
         job=str(values.get("job", "")),
         contract_type=str(values.get("contract_type", "")),
         pets=tuple(_pet(item) for item in _items(values.get("pets", []), "pets")),

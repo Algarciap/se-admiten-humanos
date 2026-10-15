@@ -190,7 +190,7 @@ class AccountTests(unittest.TestCase):
                 pragma user_version = 11;
             """)
         with RentalStore(self.database) as store:
-            self.assertEqual(store.connection.execute("pragma user_version").fetchone()[0], 12)
+            self.assertEqual(store.connection.execute("pragma user_version").fetchone()[0], 13)
             self.assertEqual(store.web_session_user_id(digest(raw)), "legacy")
             self.assertEqual(store.load_primary_search_profile("legacy").max_rent_eur, 1100)
             self.assertIsNone(Accounts(store).account("legacy"))
