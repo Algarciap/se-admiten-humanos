@@ -1,0 +1,13 @@
+.git
+.github
+.env
+.env.*
+config/profiles.local.json
+*.sqlite
+*.sqlite3
+__pycache__
+.pytest_cache
+.ruff_cache
+.coverage
+tests
+docs

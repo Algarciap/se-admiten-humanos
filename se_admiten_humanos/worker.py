@@ -1,0 +1,222 @@
+"""Long-running, baseline-safe worker for an SQLite-backed deployment."""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+import time
+from collections.abc import Callable, Mapping
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Protocol
+
+from .acquisition import AcquisitionResult, AcquisitionRunner, Notifier
+from .alquiler_seguro import AlquilerSeguroSource
+from .persistence import RentalStore
+from .profile_config import ProfileBundle, load_profile_bundle_json
+from .telegram import notifier_from_environment
+from .website_watcher import WebsiteSource, WebsiteWatcherAdapter
+
+
+class WorkerConfigurationError(ValueError):
+    """A deployment setting requires operator intervention."""
+
+
+class NotifierFactory(Protocol):
+    def __call__(
+        self,
+        store: RentalStore,
+        environment: Mapping[str, str] | None = None,
+    ) -> Notifier: ...
+
+
+@dataclass(frozen=True, slots=True)
+class WorkerSettings:
+    database_path: str = "rentals.sqlite3"
+    poll_interval_seconds: int = 180
+    max_listings_per_run: int = 50
+    max_consecutive_failures: int = 3
+
+    @classmethod
+    def from_environment(
+        cls,
+        environment: Mapping[str, str] | None = None,
+    ) -> "WorkerSettings":
+        values = os.environ if environment is None else environment
+        try:
+            settings = cls(
+                database_path=values.get("DATABASE_PATH", "rentals.sqlite3").strip(),
+                poll_interval_seconds=int(
+                    values.get("POLL_INTERVAL_SECONDS", "180").strip()
+                ),
+                max_listings_per_run=int(
+                    values.get("MAX_LISTINGS_PER_RUN", "50").strip()
+                ),
+                max_consecutive_failures=int(
+                    values.get("MAX_CONSECUTIVE_FAILURES", "3").strip()
+                ),
+            )
+        except ValueError as error:
+            raise WorkerConfigurationError(
+                "Worker numeric settings must contain whole numbers"
+            ) from error
+        settings.validate()
+        return settings
+
+    def validate(self) -> None:
+        if not self.database_path:
+            raise WorkerConfigurationError("DATABASE_PATH cannot be empty")
+        if self.poll_interval_seconds < 60:
+            raise WorkerConfigurationError(
+                "POLL_INTERVAL_SECONDS must be at least 60"
+            )
+        if self.max_listings_per_run <= 0:
+            raise WorkerConfigurationError(
+                "MAX_LISTINGS_PER_RUN must be greater than zero"
+            )
+        if self.max_consecutive_failures <= 0:
+            raise WorkerConfigurationError(
+                "MAX_CONSECUTIVE_FAILURES must be greater than zero"
+            )
+        parent = Path(self.database_path).expanduser().parent
+        if not parent.exists():
+            raise WorkerConfigurationError(
+                f"Database directory does not exist: {parent}"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class WorkerCycleResult:
+    source_id: str
+    status: str
+    profiles_imported: int = 0
+    discoveries_recorded: int = 0
+    acquisition: AcquisitionResult | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        values = asdict(self)
+        if self.acquisition is not None:
+            values["acquisition"] = self.acquisition.to_dict()
+        return values
+
+
+def _save_bundle(store: RentalStore, bundle: ProfileBundle) -> None:
+    store.save_user(bundle.user)
+    for renter_profile in bundle.renter_profiles:
+        store.save_renter_profile(renter_profile)
+    for search_profile in bundle.search_profiles:
+        store.save_search_profile(search_profile)
+
+
+def _ensure_profiles(
+    store: RentalStore,
+    environment: Mapping[str, str],
+) -> int:
+    if store.load_enabled_search_profiles():
+        return 0
+    raw_bundle = environment.get("PROFILE_BUNDLE_JSON", "")
+    if not raw_bundle.strip():
+        raise WorkerConfigurationError(
+            "The empty database needs PROFILE_BUNDLE_JSON with at least one enabled search"
+        )
+    try:
+        bundle = load_profile_bundle_json(raw_bundle)
+        _save_bundle(store, bundle)
+    except (KeyError, TypeError, ValueError) as error:
+        raise WorkerConfigurationError(f"PROFILE_BUNDLE_JSON is invalid: {error}") from error
+    if not store.load_enabled_search_profiles():
+        raise WorkerConfigurationError(
+            "PROFILE_BUNDLE_JSON must contain at least one enabled search"
+        )
+    return len(bundle.search_profiles)
+
+
+def run_worker_cycle(
+    settings: WorkerSettings,
+    environment: Mapping[str, str],
+    *,
+    source: WebsiteSource | None = None,
+    notifier_factory: NotifierFactory = notifier_from_environment,
+) -> WorkerCycleResult:
+    """Run one bootstrap or acquisition cycle against persistent state."""
+
+    settings.validate()
+    website_source = AlquilerSeguroSource() if source is None else source
+    with RentalStore(settings.database_path) as store:
+        profiles_imported = _ensure_profiles(store, environment)
+        adapter = WebsiteWatcherAdapter(store, website_source)
+        if not store.website_source_initialized(adapter.source_id):
+            baseline = adapter.initialize_baseline()
+            return WorkerCycleResult(
+                source_id=adapter.source_id,
+                status="baseline_created",
+                profiles_imported=profiles_imported,
+                discoveries_recorded=baseline.discoveries_recorded,
+            )
+        try:
+            notifier = notifier_factory(store, environment)
+        except ValueError as error:
+            raise WorkerConfigurationError(str(error)) from error
+        acquisition = AcquisitionRunner(
+            store,
+            notifier,
+            max_listings_per_run=settings.max_listings_per_run,
+        ).run(adapter)
+        if acquisition.status not in {"empty", "succeeded"}:
+            raise RuntimeError(
+                f"Source cycle finished with unhealthy status {acquisition.status!r}"
+            )
+        return WorkerCycleResult(
+            source_id=adapter.source_id,
+            status=acquisition.status,
+            profiles_imported=profiles_imported,
+            acquisition=acquisition,
+        )
+
+
+def run_worker(
+    settings: WorkerSettings,
+    environment: Mapping[str, str] | None = None,
+    *,
+    max_cycles: int | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+    cycle: Callable[
+        [WorkerSettings, Mapping[str, str]], WorkerCycleResult
+    ] = run_worker_cycle,
+) -> int:
+    """Poll forever, failing after repeated errors so the platform restarts us."""
+
+    values = dict(os.environ if environment is None else environment)
+    consecutive_failures = 0
+    cycles = 0
+    while max_cycles is None or cycles < max_cycles:
+        started = time.monotonic()
+        try:
+            result = cycle(settings, values)
+        except WorkerConfigurationError:
+            raise
+        except Exception as error:
+            consecutive_failures += 1
+            print(
+                json.dumps(
+                    {
+                        "status": "worker_cycle_failed",
+                        "failure": consecutive_failures,
+                        "error": f"{type(error).__name__}: {error}"[:1000],
+                    },
+                    ensure_ascii=False,
+                ),
+                file=sys.stderr,
+                flush=True,
+            )
+            if consecutive_failures >= settings.max_consecutive_failures:
+                return 1
+        else:
+            consecutive_failures = 0
+            print(json.dumps(result.to_dict(), ensure_ascii=False), flush=True)
+        cycles += 1
+        if max_cycles is None or cycles < max_cycles:
+            elapsed = time.monotonic() - started
+            sleep(max(0.0, settings.poll_interval_seconds - elapsed))
+    return 0

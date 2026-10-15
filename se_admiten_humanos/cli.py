@@ -32,6 +32,7 @@ from .telegram import (
     notifier_from_environment,
 )
 from .website_watcher import WebsiteWatcherAdapter
+from .worker import WorkerConfigurationError, WorkerSettings, run_worker
 
 
 def _load_environment_file(path: str | Path) -> None:
@@ -217,6 +218,15 @@ def _build_parser() -> argparse.ArgumentParser:
         default=50,
         help="hard processing limit per run (default: 50)",
     )
+    worker_parser = subparsers.add_parser(
+        "run-worker",
+        help="continuously poll configured sources for a hosted deployment",
+    )
+    worker_parser.add_argument(
+        "--env-file",
+        default=".env",
+        help="environment file to load when present (default: .env)",
+    )
     return parser
 
 
@@ -376,4 +386,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"Source run could not start: {error}", file=sys.stderr)
             return 2
         return _report_source_result(result)
+    if args.command == "run-worker":
+        try:
+            _load_environment_file(args.env_file)
+            settings = WorkerSettings.from_environment()
+            return run_worker(settings)
+        except WorkerConfigurationError as error:
+            print(f"Worker configuration is invalid: {error}", file=sys.stderr)
+            return 2
+        except KeyboardInterrupt:
+            print("Worker stopped.", file=sys.stderr)
+            return 130
     return 2

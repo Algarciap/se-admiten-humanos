@@ -74,8 +74,10 @@ personal WhatsApp accounts, or send messages through unsupported portal APIs.
 - Python regression tests plus source-registry validation.
 - Tested Telegram delivery adapter with per-user destinations, atomic claims, retries, and an
   actionable listing button; the bot and end-to-end local delivery path are working.
-- Idealista API access and quota confirmation, scheduling, and additional permitted agency adapters
-  remain undeployed. Fotocasa is deliberately excluded from the initial deployment.
+- Railway-ready background worker with safe first-boot profile import, no-alert website baseline,
+  three-minute polling, persistent SQLite state, and visible repeated-failure exits.
+- Idealista API access and quota confirmation and additional permitted agency adapters remain
+  undeployed. Fotocasa is deliberately excluded from the initial deployment.
 
 ## Run locally
 
@@ -135,6 +137,23 @@ public detail pages only for new IDs. The separate baseline command is mandatory
 homes already online as processed and sends zero alerts, preventing a first-run flood. Empty or
 structurally changed pages fail visibly. See
 [`docs/alquiler-seguro.md`](docs/alquiler-seguro.md) before scheduling it.
+
+## Run continuously on Railway
+
+The initial hosted deployment uses one Railway background worker and one persistent volume. The
+worker runs continuously and performs a check every three minutes; it does not rely on Railway cron
+and it does not require a personal computer to remain on. SQLite is appropriate for this single
+worker, but the service must remain at one replica and the database must live on the mounted volume.
+
+On a brand-new database, the worker imports the private profile from a sealed environment variable
+and creates an Alquiler Seguro baseline. That first cycle sends zero messages. Later cycles process
+only newly discovered listing IDs through the normal classifier, matching, deduplication, and
+Telegram pipeline. Configuration errors stop immediately; transient failures are logged and the
+process exits after three consecutive failures so Railway can restart it visibly.
+
+See [`docs/railway.md`](docs/railway.md) for the exact volume, variables, deployment, verification,
+and local-scheduler handover procedure. Never commit the Telegram token, chat id, private profile,
+or SQLite database.
 
 ## Telegram delivery
 

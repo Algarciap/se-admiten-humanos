@@ -139,11 +139,10 @@ def _search_profile(payload: Any) -> SearchProfile:
     )
 
 
-def load_profile_bundle(path: str | Path) -> ProfileBundle:
-    """Read and validate one private profile bundle from JSON."""
+def parse_profile_bundle(payload: Any) -> ProfileBundle:
+    """Validate a decoded private profile bundle without logging its contents."""
 
-    with Path(path).open(encoding="utf-8") as handle:
-        payload = _mapping(json.load(handle), "profile bundle")
+    payload = _mapping(payload, "profile bundle")
     user_values = _mapping(payload["user"], "user")
     user = User(
         id=str(user_values["id"]),
@@ -161,3 +160,25 @@ def load_profile_bundle(path: str | Path) -> ProfileBundle:
             for item in _items(payload.get("search_profiles", []), "search_profiles")
         ),
     )
+
+
+def load_profile_bundle_json(value: str) -> ProfileBundle:
+    """Read a private profile bundle from an environment-safe JSON string."""
+
+    if not value.strip():
+        raise ValueError("Profile bundle JSON cannot be empty")
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError as error:
+        raise ValueError(
+            "Profile bundle is invalid JSON at "
+            f"line {error.lineno}, column {error.colno}"
+        ) from error
+    return parse_profile_bundle(payload)
+
+
+def load_profile_bundle(path: str | Path) -> ProfileBundle:
+    """Read and validate one private profile bundle from JSON."""
+
+    with Path(path).open(encoding="utf-8") as handle:
+        return parse_profile_bundle(json.load(handle))

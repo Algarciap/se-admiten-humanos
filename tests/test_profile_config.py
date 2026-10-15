@@ -7,7 +7,10 @@ from pathlib import Path
 
 from se_admiten_humanos.cli import main
 from se_admiten_humanos.persistence import RentalStore
-from se_admiten_humanos.profile_config import load_profile_bundle
+from se_admiten_humanos.profile_config import (
+    load_profile_bundle,
+    load_profile_bundle_json,
+)
 
 
 class ProfileConfigTests(unittest.TestCase):
@@ -83,6 +86,24 @@ class ProfileConfigTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "JSON boolean"):
                 load_profile_bundle(path)
+
+    def test_bundle_can_load_from_hosted_environment_json(self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        raw = (root / "config" / "profiles.local.example.json").read_text(
+            encoding="utf-8"
+        )
+
+        bundle = load_profile_bundle_json(raw)
+
+        self.assertEqual(bundle.user.id, "user-example")
+
+    def test_invalid_environment_json_does_not_echo_private_value(self) -> None:
+        private_value = '{"renter_name":"Private Name"'
+
+        with self.assertRaises(ValueError) as raised:
+            load_profile_bundle_json(private_value)
+
+        self.assertNotIn("Private Name", str(raised.exception))
 
 
 if __name__ == "__main__":
