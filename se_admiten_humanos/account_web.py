@@ -31,7 +31,7 @@ def handle_accounts(app, store, environ, start_response, user_id, cookies):
     csrf = cookies.get(_CSRF_COOKIE) or secrets.token_urlsafe(24)
 
     def page(title, content, status="200 OK"):
-        return app._respond(start_response, status, _layout(title, f'<header><a class="brand" href="/">Se admiten humanos</a><a href="/account">Mi cuenta</a></header><main class="center status-login"><section class="success"><h1>{title}</h1>{content}</section></main>'),
+        return app._respond(start_response, status, _layout(title, f'<header><a class="brand" href="/">Se admiten humanos</a><a class="account-header-link" href="/account">Mi cuenta</a></header><main class="center status-login account-page"><section class="success"><p class="eyebrow">Tu espacio</p><h1>{title}</h1>{content}</section></main>'),
                             cookies=(() if cookies.get(_CSRF_COOKIE) else (app._csrf_cookie(csrf),)))
 
     def signed_in(new_user_id):
@@ -49,7 +49,7 @@ def handle_accounts(app, store, environ, start_response, user_id, cookies):
         return app._error(start_response, "404 Not Found", "Página no encontrada.")
     if method == "GET":
         if path == "/account/login":
-            return page("Entra en tu cuenta", _form(path, csrf, email_field + password_field, "Entrar") + '<p><a href="/account/register">Crear cuenta</a> · <a href="/account/recover">Recuperar contraseña</a></p>')
+            return page("Entra en tu cuenta", _form(path, csrf, email_field + password_field, "Entrar") + '<nav class="account-actions" aria-label="Otras opciones de acceso"><a class="account-action account-action-main" href="/account/register">Crear cuenta</a><a class="account-action" href="/account/recover">Recuperar contraseña</a></nav>')
         if path in {"/account/register", "/account/recover"}:
             title = "Verifica tu correo" if path.endswith("register") else "Recupera tu cuenta"
             note = "Recibirás un enlace de un solo uso para continuar."
