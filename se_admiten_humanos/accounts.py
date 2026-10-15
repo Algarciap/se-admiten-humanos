@@ -10,6 +10,8 @@ import secrets
 import smtplib
 import ssl
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
@@ -71,6 +73,7 @@ class MailSettings:
     username: str = ""
     password: str = field(default="", repr=False)
     implicit_tls: bool = False
+    brevo_api_key: str = field(default="", repr=False)
 
     def validate(self, secure: bool = True) -> None:
         url = urlsplit(self.public_url)
@@ -78,11 +81,12 @@ class MailSettings:
                 or not url.netloc or url.username or url.password or url.query
                 or url.fragment or url.path not in {"", "/"}):
             raise ValueError("PUBLIC_BASE_URL must be an origin (HTTPS in production)")
-        if not self.host or not 1 <= self.port <= 65535:
-            raise ValueError("SMTP_HOST and a valid SMTP_PORT are required")
         normalize_email(self.sender)
-        if bool(self.username) != bool(self.password):
-            raise ValueError("SMTP_USERNAME and SMTP_PASSWORD must be configured together")
+        if not self.brevo_api_key:
+            if not self.host or not 1 <= self.port <= 65535:
+                raise ValueError("SMTP_HOST and a valid SMTP_PORT are required")
+            if bool(self.username) != bool(self.password):
+                raise ValueError("SMTP_USERNAME and SMTP_PASSWORD must be configured together")
 
 
 class AccountMailError(RuntimeError):
@@ -90,17 +94,43 @@ class AccountMailError(RuntimeError):
 
 
 def send_account_email(settings: MailSettings, recipient: str, purpose: str, token: str) -> None:
-    message = EmailMessage()
-    message["From"] = settings.sender
-    message["To"] = recipient
-    message["Subject"] = "Verifica tu cuenta" if purpose == "verify" else "Recupera tu cuenta"
-    message.set_content(
+    subject = "Verifica tu cuenta" if purpose == "verify" else "Recupera tu cuenta"
+    content = (
         "Se admiten humanos\n\n"
         + ("Verifica tu correo y elige tu contraseña" if purpose == "verify" else "Elige una nueva contraseña")
         + f":\n{settings.public_url.rstrip('/')}/account/{purpose}?token={token}\n\n"
         + "El enlace es de un solo uso y caduca en 30 minutos. "
         + "Si no lo has solicitado, ignora este mensaje."
     )
+    if settings.brevo_api_key:
+        request = urllib.request.Request(
+            "https://api.brevo.com/v3/smtp/email",
+            data=json.dumps({
+                "sender": {"name": "Se admiten humanos", "email": settings.sender},
+                "to": [{"email": recipient}],
+                "subject": subject,
+                "textContent": content,
+            }).encode(),
+            headers={
+                "accept": "application/json",
+                "api-key": settings.brevo_api_key,
+                "content-type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=15) as response:
+                if not 200 <= response.status < 300:
+                    raise AccountMailError("No se pudo enviar el correo. Inténtalo más tarde.")
+            return
+        except (OSError, urllib.error.URLError, urllib.error.HTTPError):
+            raise AccountMailError("No se pudo enviar el correo. Inténtalo más tarde.") from None
+
+    message = EmailMessage()
+    message["From"] = settings.sender
+    message["To"] = recipient
+    message["Subject"] = subject
+    message.set_content(content)
     context = ssl.create_default_context()
     try:
         if settings.implicit_tls:

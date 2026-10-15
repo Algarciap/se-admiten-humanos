@@ -68,6 +68,7 @@ def web_settings_from_environment(
             username=values.get("SMTP_USERNAME", ""),
             password=values.get("SMTP_PASSWORD", ""),
             implicit_tls=tls_value == "true",
+            brevo_api_key=values.get("BREVO_API_KEY", ""),
         )
         mail.validate(secure_value == "true")
     return (

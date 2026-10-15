@@ -4,6 +4,7 @@ import io
 import json
 import tempfile
 import unittest
+import urllib.error
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from http.cookies import SimpleCookie
@@ -312,6 +313,27 @@ class MailAndSettingsTests(unittest.TestCase):
                 send_account_email(MAIL, "ana@example.com", "verify", "secret-token")
             self.assertNotIn("sensitive", str(caught.exception))
 
+    def test_brevo_https_api_takes_precedence_without_exposing_key(self):
+        response = MagicMock(status=201)
+        response.__enter__.return_value = response
+        settings = MailSettings(
+            "https://humanos.example", "", "accounts@example.com",
+            brevo_api_key="private-api-key",
+        )
+        with patch("se_admiten_humanos.accounts.urllib.request.urlopen", return_value=response) as urlopen:
+            send_account_email(settings, "ana@example.com", "verify", "secret-token")
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.full_url, "https://api.brevo.com/v3/smtp/email")
+        self.assertEqual(request.get_header("Api-key"), "private-api-key")
+        body = json.loads(request.data)
+        self.assertEqual(body["to"], [{"email": "ana@example.com"}])
+        self.assertIn("secret-token", body["textContent"])
+
+        with patch("se_admiten_humanos.accounts.urllib.request.urlopen", side_effect=urllib.error.URLError("sensitive")):
+            with self.assertRaisesRegex(AccountMailError, "No se pudo enviar") as caught:
+                send_account_email(settings, "ana@example.com", "verify", "secret-token")
+        self.assertNotIn("sensitive", str(caught.exception))
+
     def test_enabled_accounts_fail_closed_on_missing_or_insecure_mail_settings(self):
         with self.assertRaises(ValueError):
             web_settings_from_environment({"TELEGRAM_BOT_USERNAME": "ExampleBot", "ACCOUNTS_ENABLED": "true"})
@@ -320,6 +342,8 @@ class MailAndSettingsTests(unittest.TestCase):
         settings, _ = web_settings_from_environment({"TELEGRAM_BOT_USERNAME": "ExampleBot", "ACCOUNTS_ENABLED": "true", "PUBLIC_BASE_URL": "https://humanos.example", "SMTP_HOST": "smtp.example", "SMTP_FROM": "accounts@example.com"})
         self.assertTrue(settings.accounts_enabled)
         self.assertEqual(settings.mail.port, 587)
+        settings, _ = web_settings_from_environment({"TELEGRAM_BOT_USERNAME": "ExampleBot", "ACCOUNTS_ENABLED": "true", "PUBLIC_BASE_URL": "https://humanos.example", "SMTP_FROM": "accounts@example.com", "BREVO_API_KEY": "secret"})
+        self.assertEqual(settings.mail.brevo_api_key, "secret")
 
     def test_request_logging_omits_capabilities_in_query_strings(self):
         handler = object.__new__(QuietRequestHandler)

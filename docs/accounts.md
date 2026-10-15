@@ -8,14 +8,17 @@ public while that mode is active. This change does not enable Idealista or new s
 
 ## Configure email before rollout
 
-Use a transactional SMTP provider and a sender address you control. Set up its
-required domain verification, SPF and DKIM records. Configure Railway sealed
-variables directly; never paste passwords or mail capabilities into a chat or logs.
+Use Brevo's HTTPS transactional-email API on Railway Free, Trial and Hobby plans,
+where outbound SMTP is blocked. Register and verify a sender address in Brevo, then
+configure the API key as a Railway sealed variable. SMTP remains available for
+Railway Pro or other hosts. Set up domain verification, SPF and DKIM before a public
+rollout. Never paste passwords or mail capabilities into a chat or logs.
 
 | Variable | Purpose |
 | --- | --- |
 | `ACCOUNTS_ENABLED` | `true` enables verified account routes and requires complete mail settings |
 | `PUBLIC_BASE_URL` | Canonical website origin, such as `https://se-admiten-humanos-production.up.railway.app`; no path, query, or credentials |
+| `BREVO_API_KEY` | Preferred Railway transport; sends through Brevo's HTTPS API and takes precedence over SMTP |
 | `SMTP_HOST` | Provider's SMTP hostname |
 | `SMTP_PORT` | Defaults to `587` |
 | `SMTP_FROM` | Verified sender email address, without a display-name wrapper |
