@@ -1,6 +1,6 @@
 # Madrid source strategy
 
-Last reviewed on 2026-10-14. This is an operational registry, not an endorsement of any company.
+Last reviewed on 2026-10-15. This is an operational registry, not an endorsement of any company.
 
 ## First wave
 
@@ -13,6 +13,7 @@ first-party Madrid inventory:
 | Pisos.com | Major general portal | Native alert if available | Description |
 | Yaencontre | Major general portal | Personalized email alert | Description |
 | Alquiler Seguro | Rental specialist | Public sitemap watcher; daily email only as fallback | Description or written agent confirmation |
+| Wolo | First-party rental agency | Manual pet-filter watch and direct visit booking until written parser permission | Explicit pet filter and listing text |
 | Vivenio | First-party landlord | Direct inventory/contact | Company says it is pet-friendly |
 | Testa Homes | First-party landlord | Pet filter plus direct contact | Explicit `Acepta mascotas` field |
 | Agencia Negociadora del Alquiler | Madrid rental specialist | Agency site plus its portal profile | Confirm per property |
@@ -55,6 +56,8 @@ users, but no Fotocasa alert or parser is enabled.
 
 - Alquiler Seguro publishes a dynamic sitemap of public listing URLs. The implemented watcher uses
   it for discovery, fetches detail pages only for unseen IDs, and treats the daily email as fallback.
+- Wolo exposes an `Acepta mascotas` filter and states accepted, rejected, or pending pet status in
+  individual listings. It also supports direct visit booking, making it a high-priority manual source.
 - Testa Homes exposes an `Acepta mascotas` characteristic in its first-party inventory.
 - Vivenio states in its FAQ that it accepts pets subject to community rules and focuses on long-term
   rental.
@@ -81,3 +84,7 @@ authorizes a background parser.
 [Testa Homes' current conditions](https://www.testahomes.com/condiciones-de-uso/) do not provide a
 clear grant for recurring automated extraction. Its pet filter remains valuable for manual searches,
 but a background adapter also waits for written permission.
+
+[Wolo's current legal notice](https://www.wolorent.com/aviso-legal) requires prior written
+authorization for reproduction or reuse of its site content. Its first-party search and pet filter
+remain valuable for manual use, but a recurring parser must wait for written permission.

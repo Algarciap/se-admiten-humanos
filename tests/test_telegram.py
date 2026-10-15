@@ -82,7 +82,8 @@ class TelegramTests(unittest.TestCase):
 
     def test_notifier_marks_success_and_avoids_duplicates(self) -> None:
         client = Mock()
-        notifier = TelegramNotifier(self.store, client, {"user-1": "987654"})
+        self.store.save_telegram_destination("user-1", "987654")
+        notifier = TelegramNotifier(self.store, client)
 
         first = notifier.deliver(self.result)
         repeated = notifier.deliver(self.result)
@@ -95,7 +96,8 @@ class TelegramTests(unittest.TestCase):
     def test_failed_delivery_is_released_for_retry(self) -> None:
         client = Mock()
         client.send_message.side_effect = RuntimeError("network down")
-        notifier = TelegramNotifier(self.store, client, {"user-1": "987654"})
+        self.store.save_telegram_destination("user-1", "987654")
+        notifier = TelegramNotifier(self.store, client)
 
         attempt = notifier.deliver(self.result)[0]
 
@@ -105,12 +107,12 @@ class TelegramTests(unittest.TestCase):
         )
 
     def test_missing_user_destination_does_not_claim(self) -> None:
-        attempt = TelegramNotifier(self.store, Mock(), {}).deliver(self.result)[0]
+        attempt = TelegramNotifier(self.store, Mock()).deliver(self.result)[0]
 
         self.assertEqual(attempt.status, "skipped")
         self.assertIsNone(self.store.notification_status(attempt.match_id, "telegram"))
 
-    def test_environment_configuration_is_scoped_to_one_user(self) -> None:
+    def test_legacy_environment_mapping_is_persisted_for_the_user(self) -> None:
         notifier = notifier_from_environment(
             self.store,
             {
@@ -120,7 +122,82 @@ class TelegramTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(notifier.user_chat_ids, {"user-1": "987654"})
+        self.assertIsInstance(notifier, TelegramNotifier)
+        self.assertEqual(
+            self.store.load_telegram_destinations(), {"user-1": "987654"}
+        )
+
+    def test_existing_database_mapping_needs_only_the_bot_token(self) -> None:
+        self.store.save_telegram_destination("user-1", "987654")
+
+        notifier = notifier_from_environment(
+            self.store,
+            {"TELEGRAM_BOT_TOKEN": "123456:test_token"},
+        )
+
+        self.assertIsInstance(notifier, TelegramNotifier)
+
+    def test_legacy_environment_does_not_overwrite_database_mapping(self) -> None:
+        self.store.save_telegram_destination("user-1", "111111")
+
+        notifier_from_environment(
+            self.store,
+            {
+                "TELEGRAM_BOT_TOKEN": "123456:test_token",
+                "TELEGRAM_USER_ID": "user-1",
+                "TELEGRAM_CHAT_ID": "999999",
+            },
+        )
+
+        self.assertEqual(self.store.telegram_chat_id("user-1"), "111111")
+
+    def test_users_receive_only_matches_for_their_own_budget(self) -> None:
+        self.store.save_telegram_destination("user-1", "111111")
+        self.store.save_user(User(id="user-2", display_name="Lower budget"))
+        self.store.save_search_profile(
+            SearchProfile(
+                id="search-2",
+                user_id="user-2",
+                name="Madrid up to 700",
+                max_rent_eur=700,
+                municipality="Madrid",
+            )
+        )
+        self.store.save_telegram_destination("user-2", "222222")
+        client = Mock()
+        notifier = TelegramNotifier(self.store, client)
+
+        expensive_result = ListingPipeline(self.store).process(
+            Listing(
+                source_id="idealista",
+                external_id="costs-900",
+                title="Piso de 900 euros",
+                price_eur=900,
+                municipality="Madrid",
+                url="https://example.com/listing/costs-900",
+            )
+        )
+        affordable_result = ListingPipeline(self.store).process(
+            Listing(
+                source_id="idealista",
+                external_id="costs-650",
+                title="Piso de 650 euros",
+                price_eur=650,
+                municipality="Madrid",
+                url="https://example.com/listing/costs-650",
+            )
+        )
+
+        expensive_attempts = notifier.deliver(expensive_result)
+        affordable_attempts = notifier.deliver(affordable_result)
+
+        self.assertEqual([attempt.user_id for attempt in expensive_attempts], ["user-1"])
+        self.assertEqual(
+            [attempt.user_id for attempt in affordable_attempts],
+            ["user-1", "user-2"],
+        )
+        delivered_chat_ids = [call.args[0] for call in client.send_message.call_args_list]
+        self.assertEqual(delivered_chat_ids, ["111111", "111111", "222222"])
 
     def test_environment_configuration_fails_closed(self) -> None:
         with self.assertRaisesRegex(ValueError, "TELEGRAM_CHAT_ID"):
@@ -130,6 +207,13 @@ class TelegramTests(unittest.TestCase):
                     "TELEGRAM_BOT_TOKEN": "123456:test_token",
                     "TELEGRAM_USER_ID": "user-1",
                 },
+            )
+
+    def test_bot_token_without_a_database_destination_fails_closed(self) -> None:
+        with self.assertRaisesRegex(ValueError, "enabled Telegram destination"):
+            notifier_from_environment(
+                self.store,
+                {"TELEGRAM_BOT_TOKEN": "123456:test_token"},
             )
 
 

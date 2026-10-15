@@ -128,6 +128,22 @@
     "verified_on": "2026-10-14"
   },
   {
+    "id": "wolo",
+    "name": "Wolo",
+    "kind": "rental_agency",
+    "priority": 1,
+    "base_url": "https://www.wolorent.com/",
+    "search_url": "https://www.wolorent.com/pisos-en-alquiler/madrid",
+    "coverage": "Madrid city and region",
+    "acquisition": "direct_inventory_pet_filter_and_visit_booking",
+    "automation_status": "manual_watch_until_written_permission",
+    "pet_signal": "explicit_pet_filter_and_listing_text",
+    "direct_contact": "platform_visit_booking",
+    "evidence_url": "https://www.wolorent.com/pisos-en-alquiler/madrid",
+    "notes": "High-value first-party source with an Acepta mascotas filter, explicit listing-level pet language, and direct visit booking. Keep background parsing disabled until Wolo grants written permission because its legal notice requires prior authorization for reuse of site content.",
+    "verified_on": "2026-10-15"
+  },
+  {
     "id": "agencia_negociadora_alquiler",
     "name": "Agencia Negociadora del Alquiler",
     "kind": "rental_agency",

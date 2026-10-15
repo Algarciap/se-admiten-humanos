@@ -37,7 +37,7 @@ class SourceRegistryTests(unittest.TestCase):
         cls.registry = default_registry()
 
     def test_all_sources_load(self) -> None:
-        self.assertEqual(self.registry.count, 24)
+        self.assertEqual(self.registry.count, 25)
 
     def test_recognizes_supported_source_domains(self) -> None:
         self.assertEqual(
@@ -49,6 +49,12 @@ class SourceRegistryTests(unittest.TestCase):
         self.assertEqual(
             self.registry.source_id_from_text("https://www.vivenio.com/edificio/example"),
             "vivenio",
+        )
+        self.assertEqual(
+            self.registry.source_id_from_text(
+                "https://www.wolorent.com/pisos-en-alquiler/madrid"
+            ),
+            "wolo",
         )
 
     def test_allows_only_registered_listing_domains(self) -> None:

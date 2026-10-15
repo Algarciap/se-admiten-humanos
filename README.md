@@ -72,8 +72,8 @@ personal WhatsApp accounts, or send messages through unsupported portal APIs.
 - Machine-readable registry of portals, agencies, institutional landlords, and public housing sources.
 - Safe direct-email gate: draft by default, allow-listed agency email only for automatic sending.
 - Python regression tests plus source-registry validation.
-- Tested Telegram delivery adapter with per-user destinations, atomic claims, retries, and an
-  actionable listing button; the bot and end-to-end local delivery path are working.
+- Tested Telegram delivery adapter with database-backed per-user destinations, atomic claims,
+  retries, and an actionable listing button; different budgets route to different private chats.
 - Railway-ready background worker with safe first-boot profile import, no-alert website baseline,
   three-minute polling, persistent SQLite state, and visible repeated-failure exits.
 - Idealista API access and quota confirmation and additional permitted agency adapters remain
@@ -158,9 +158,15 @@ or SQLite database.
 ## Telegram delivery
 
 Telegram is the first alert channel. Create a bot with BotFather, send it `/start`, and keep its
-token outside Git. `TELEGRAM_USER_ID` is the application user id from the private profile bundle;
-`TELEGRAM_CHAT_ID` is that user's numeric Telegram chat id. The notifier requires an explicit
-user-to-chat mapping so alerts from one person's search cannot leak into another person's chat.
+token outside Git. Telegram destinations are stored per application user in SQLite; the notifier
+looks up the owner of each eligible search match and sends only to that user's enabled chat. A chat
+cannot be linked to two application users, and one user's notification claim never suppresses a
+different user's match.
+
+`TELEGRAM_USER_ID` and `TELEGRAM_CHAT_ID` remain as a backward-compatible bootstrap for the first
+deployed user. The worker imports that pair into the database only when that user has no destination;
+it never overwrites a database-managed mapping. Public onboarding will replace this bootstrap with a
+single-use Telegram `/start` link written by the authenticated website.
 
 Every alert labels the pet policy, shows the matching phrase (or clearly says it was not mentioned),
 and includes an **Abrir anuncio** button. A delivery is claimed immediately before the API call,

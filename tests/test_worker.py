@@ -133,6 +133,23 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(notifier.deliveries, 1)
         self.assertEqual(self.source.details_fetched, ["new"])
 
+    def test_first_live_cycle_migrates_legacy_telegram_mapping(self):
+        run_worker_cycle(self.settings, self.environment, source=self.source)
+        environment = {
+            "TELEGRAM_BOT_TOKEN": "123456:test_token",
+            "TELEGRAM_USER_ID": "user-example",
+            "TELEGRAM_CHAT_ID": "987654",
+        }
+
+        result = run_worker_cycle(self.settings, environment, source=self.source)
+
+        self.assertEqual(result.status, "empty")
+        with RentalStore(self.database) as store:
+            self.assertEqual(
+                store.load_telegram_destinations(),
+                {"user-example": "987654"},
+            )
+
     def test_empty_database_requires_private_profile_secret_before_discovery(self):
         with self.assertRaisesRegex(WorkerConfigurationError, "PROFILE_BUNDLE_JSON"):
             run_worker_cycle(self.settings, {}, source=self.source)

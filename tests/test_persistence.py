@@ -220,6 +220,28 @@ class PersistenceTests(unittest.TestCase):
         self.assertTrue(self.store.claim_notification(second_match_id, "telegram"))
         self.assertFalse(self.store.claim_notification(first_match_id, "telegram"))
 
+    def test_telegram_destinations_are_isolated_per_user(self) -> None:
+        second_user = User(id="user-2", display_name="Second user")
+        self.store.save_user(second_user)
+
+        self.store.save_telegram_destination(self.user.id, "111111")
+        self.store.save_telegram_destination(second_user.id, "222222")
+
+        self.assertEqual(self.store.telegram_chat_id(self.user.id), "111111")
+        self.assertEqual(self.store.telegram_chat_id(second_user.id), "222222")
+        self.assertEqual(
+            self.store.load_telegram_destinations(),
+            {"user-1": "111111", "user-2": "222222"},
+        )
+
+    def test_telegram_chat_cannot_be_linked_to_two_users(self) -> None:
+        second_user = User(id="user-2", display_name="Second user")
+        self.store.save_user(second_user)
+        self.store.save_telegram_destination(self.user.id, "111111")
+
+        with self.assertRaisesRegex(ValueError, "different user"):
+            self.store.save_telegram_destination(second_user.id, "111111")
+
     def test_profile_round_trip_preserves_user_preferences(self) -> None:
         profile = SearchProfile(
             id="search-districts",
@@ -343,7 +365,7 @@ class PersistenceTests(unittest.TestCase):
                 "select count(*) from legacy_notifications_v1"
             ).fetchone()[0]
 
-        self.assertEqual(version, 4)
+        self.assertEqual(version, 5)
         self.assertEqual(listing_count, 1)
         self.assertEqual(legacy_count, 1)
 

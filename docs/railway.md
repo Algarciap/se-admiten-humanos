@@ -40,8 +40,8 @@ private.
 | `MAX_LISTINGS_PER_RUN` | `50` |
 | `MAX_CONSECUTIVE_FAILURES` | `3` |
 | `TELEGRAM_BOT_TOKEN` | BotFather token |
-| `TELEGRAM_CHAT_ID` | Numeric private chat id |
-| `TELEGRAM_USER_ID` | Application user id used in the private profile JSON |
+| `TELEGRAM_CHAT_ID` | Legacy bootstrap: first user's numeric private chat id |
+| `TELEGRAM_USER_ID` | Legacy bootstrap: first user's application id |
 | `PROFILE_BUNDLE_JSON` | Entire private profile file as one JSON value |
 
 For `PROFILE_BUNDLE_JSON`, copy the contents of the ignored `config/profiles.local.json`. Minifying
@@ -52,6 +52,12 @@ or deployment log.
 The profile variable is read only when the database has no enabled search profiles. It is safe to
 leave it configured so a deliberate fresh-volume recovery can initialize itself, but changing it
 does not overwrite profiles already stored in SQLite.
+
+The first live notification cycle stores the legacy `TELEGRAM_USER_ID`/`TELEGRAM_CHAT_ID` pair in
+SQLite. Later cycles route from the database and will not overwrite that record, even if the Railway
+variables remain configured. Future website onboarding can therefore add, change, disable, or remove
+per-user destinations without sharing one global chat setting. The bot token remains a single sealed
+service secret.
 
 ## 3. Understand the first deployment
 
@@ -64,6 +70,7 @@ The first successful worker cycle performs these operations in order:
 5. Writes a `baseline_created` event to the Railway logs and sends zero Telegram messages.
 
 On the next cycle, the worker constructs the Telegram notifier and performs a normal live check.
+That cycle also migrates the first user's legacy environment mapping into the database.
 Only listing ids that appeared after the baseline are detail-fetched and evaluated. An empty result
 is logged with status `empty`; it is a healthy outcome.
 

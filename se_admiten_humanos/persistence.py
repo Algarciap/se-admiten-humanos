@@ -16,7 +16,9 @@ from .models import Listing, PetDecision, RenterProfile, User, WebsiteDiscovery
 from .search_profile import SearchDecision, SearchProfile
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
+
+_TELEGRAM_CHAT_ID = re.compile(r"-?[1-9][0-9]*")
 
 
 def _normalize_text(value: str) -> str:
@@ -187,15 +189,21 @@ class RentalStore:
             self._create_schema_v2()
             self._migrate_v2_to_v3()
             self._migrate_v3_to_v4()
+            self._migrate_v4_to_v5()
         elif version == 1:
             self._migrate_v1_to_v2()
             self._migrate_v2_to_v3()
             self._migrate_v3_to_v4()
+            self._migrate_v4_to_v5()
         elif version == 2:
             self._migrate_v2_to_v3()
             self._migrate_v3_to_v4()
+            self._migrate_v4_to_v5()
         elif version == 3:
             self._migrate_v3_to_v4()
+            self._migrate_v4_to_v5()
+        elif version == 4:
+            self._migrate_v4_to_v5()
         elif version != SCHEMA_VERSION:
             raise RuntimeError(
                 f"Unsupported database schema version {version}; expected {SCHEMA_VERSION}"
@@ -377,6 +385,23 @@ class RentalStore:
                 on website_discoveries(source_id, processed_at, first_seen_at);
 
             pragma user_version = 4;
+            """
+        )
+        self.connection.commit()
+
+    def _migrate_v4_to_v5(self) -> None:
+        self.connection.executescript(
+            """
+            create table if not exists telegram_destinations (
+                user_id text primary key
+                    references users(id) on delete cascade,
+                chat_id text not null unique,
+                enabled integer not null check (enabled in (0, 1)),
+                created_at text not null,
+                updated_at text not null
+            );
+
+            pragma user_version = 5;
             """
         )
         self.connection.commit()
@@ -681,6 +706,83 @@ class RentalStore:
                 """,
                 (user.id, user.display_name, user.email, now, now),
             )
+
+    def save_telegram_destination(
+        self,
+        user_id: str,
+        chat_id: str,
+        *,
+        enabled: bool = True,
+    ) -> None:
+        """Create or update one user's private Telegram destination."""
+
+        normalized_user_id = user_id.strip()
+        normalized_chat_id = chat_id.strip()
+        if not normalized_user_id:
+            raise ValueError("Telegram destination user id cannot be empty")
+        if not _TELEGRAM_CHAT_ID.fullmatch(normalized_chat_id):
+            raise ValueError("Telegram chat id must be numeric")
+        self._require_user(normalized_user_id)
+        now = _utc_now()
+        try:
+            with self.connection:
+                self.connection.execute(
+                    """
+                    insert into telegram_destinations (
+                        user_id, chat_id, enabled, created_at, updated_at
+                    ) values (?, ?, ?, ?, ?)
+                    on conflict(user_id) do update set
+                        chat_id = excluded.chat_id,
+                        enabled = excluded.enabled,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        normalized_user_id,
+                        normalized_chat_id,
+                        int(enabled),
+                        now,
+                        now,
+                    ),
+                )
+        except sqlite3.IntegrityError as error:
+            raise ValueError(
+                "Telegram chat is already linked to a different user"
+            ) from error
+
+    def telegram_chat_id(self, user_id: str) -> str | None:
+        """Return one enabled destination without exposing other users' chats."""
+
+        row = self.connection.execute(
+            """
+            select chat_id
+            from telegram_destinations
+            where user_id = ? and enabled = 1
+            """,
+            (user_id.strip(),),
+        ).fetchone()
+        return str(row[0]) if row is not None else None
+
+    def telegram_destination_configured(self, user_id: str) -> bool:
+        """Return whether a user has a destination, including a disabled one."""
+
+        row = self.connection.execute(
+            "select 1 from telegram_destinations where user_id = ?",
+            (user_id.strip(),),
+        ).fetchone()
+        return row is not None
+
+    def load_telegram_destinations(self) -> dict[str, str]:
+        """Load enabled user-to-chat mappings for diagnostics and startup checks."""
+
+        rows = self.connection.execute(
+            """
+            select user_id, chat_id
+            from telegram_destinations
+            where enabled = 1
+            order by user_id
+            """
+        ).fetchall()
+        return {str(row[0]): str(row[1]) for row in rows}
 
     def save_renter_profile(self, profile: RenterProfile) -> None:
         """Create or update private renter details and structured pets."""

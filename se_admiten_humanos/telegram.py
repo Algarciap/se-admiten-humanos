@@ -108,7 +108,7 @@ class TelegramBotClient:
 
 
 class TelegramNotifier:
-    """Deliver candidates only to explicitly mapped user chat ids."""
+    """Deliver candidates only to each user's database-backed chat id."""
 
     channel = "telegram"
 
@@ -116,18 +116,16 @@ class TelegramNotifier:
         self,
         store: RentalStore,
         client: TelegramBotClient,
-        user_chat_ids: Mapping[str, str],
     ) -> None:
         self.store = store
         self.client = client
-        self.user_chat_ids = dict(user_chat_ids)
 
     def deliver(self, result: ProcessingResult) -> tuple[DeliveryAttempt, ...]:
         attempts: list[DeliveryAttempt] = []
         for outcome in result.delivery_candidates:
             match_id = outcome.match.match_id
             user_id = outcome.profile.user_id
-            chat_id = self.user_chat_ids.get(user_id, "")
+            chat_id = self.store.telegram_chat_id(user_id)
             if not chat_id:
                 attempts.append(DeliveryAttempt(match_id, user_id, "skipped", "no chat configured"))
                 continue
@@ -157,16 +155,21 @@ def notifier_from_environment(
     store: RentalStore,
     environment: Mapping[str, str] | None = None,
 ) -> TelegramNotifier:
-    """Build the single-user MVP notifier without storing secrets in Git."""
+    """Build a multi-user notifier and import the legacy one-user mapping once."""
 
     values = os.environ if environment is None else environment
-    required = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_USER_ID", "TELEGRAM_CHAT_ID")
-    missing = [name for name in required if not values.get(name, "").strip()]
-    if missing:
-        raise ValueError(f"Missing Telegram configuration: {', '.join(missing)}")
-    user_id = values["TELEGRAM_USER_ID"].strip()
-    return TelegramNotifier(
-        store,
-        TelegramBotClient(values["TELEGRAM_BOT_TOKEN"]),
-        {user_id: values["TELEGRAM_CHAT_ID"].strip()},
-    )
+    token = values.get("TELEGRAM_BOT_TOKEN", "").strip()
+    if not token:
+        raise ValueError("Missing Telegram configuration: TELEGRAM_BOT_TOKEN")
+
+    user_id = values.get("TELEGRAM_USER_ID", "").strip()
+    chat_id = values.get("TELEGRAM_CHAT_ID", "").strip()
+    if bool(user_id) != bool(chat_id):
+        missing = "TELEGRAM_CHAT_ID" if user_id else "TELEGRAM_USER_ID"
+        raise ValueError(f"Missing Telegram configuration: {missing}")
+    if user_id and chat_id and not store.telegram_destination_configured(user_id):
+        store.save_telegram_destination(user_id, chat_id)
+
+    if not store.load_telegram_destinations():
+        raise ValueError("At least one enabled Telegram destination is required")
+    return TelegramNotifier(store, TelegramBotClient(token))
