@@ -175,7 +175,9 @@ class WebApplication:
             )
         min_bedrooms = _integer(form, "preferred_min_bedrooms", "Dormitorios", 0, 10)
         income = _optional_integer(form, "monthly_income_eur", "Nómina", 1, 100_000)
-        pet_count = _integer(form, "pet_count", "Número de animales", 0, 10)
+        pet_count = _optional_integer(
+            form, "pet_count", "Número de animales", 0, 10
+        ) or 0
         pet_species = form.get("pet_species", "").strip()
         if pet_count and not pet_species:
             raise ValueError("Indica qué tipo de animales vivirán en el piso.")
@@ -184,7 +186,7 @@ class WebApplication:
         if furnished_value not in {"any", "yes", "no"}:
             raise ValueError("La preferencia de mobiliario no es válida.")
         furnished = None if furnished_value == "any" else furnished_value == "yes"
-        duration_value = form.get("rental_duration", "long_term")
+        duration_value = form.get("rental_duration", "")
         duration_options = {
             "long_term": (RentalDuration.LONG_TERM,),
             "temporary": (RentalDuration.TEMPORARY,),
@@ -420,8 +422,8 @@ def _profile_page(
                 "monthly_income_eur": renter.monthly_income_eur or "",
                 "job": renter.job,
                 "contract_type": renter.contract_type,
-                "pet_count": pet.count if pet else 0,
-                "pet_species": pet.species if pet else "gato",
+                "pet_count": pet.count if pet else "",
+                "pet_species": pet.species if pet else "",
                 "pet_notes": pet.notes if pet else "",
             })
         if search:
@@ -444,30 +446,29 @@ def _profile_page(
                     else search.accepted_rental_durations[0].value
                 ),
             })
-    is_new = user is None
-    studios = form.get("allow_studios", "on" if is_new else "") == "on"
-    unknown = form.get("allow_unknown_bedrooms", "on" if is_new else "") == "on"
-    asap = form.get("move_in_asap", "on" if is_new else "") == "on"
+    studios = form.get("allow_studios", "") == "on"
+    unknown = form.get("allow_unknown_bedrooms", "") == "on"
+    asap = form.get("move_in_asap", "") == "on"
     furnished = form.get("furnished", "any")
-    rental_duration = form.get("rental_duration", "long_term")
-    property_type_home = form.get("property_type_home", "on" if is_new else "") == "on"
+    rental_duration = form.get("rental_duration", "")
+    property_type_home = form.get("property_type_home", "") == "on"
     property_type_room = form.get("property_type_room", "") == "on"
     urgent = form.get("urgent", "") == "on"
     error_html = f'<div class="error" role="alert">{html.escape(error)}</div>' if error else ""
-    session_note = "Tus datos se guardan en este navegador y puedes volver para cambiarlos." if user else "No necesitas instalar nada. Al terminar conectarás tu Telegram."
+    session_note = "Revisa tu búsqueda y cambia lo que necesites. Esta sesión está vinculada a este navegador." if user else "Define tus criterios. Al terminar podrás conectar Telegram para recibir avisos."
     body = f"""
-    <header><a class="brand" href="/">Se admiten humanos <span>🐾</span></a><span class="badge">Gratis y open source</span></header>
+    <header><a class="brand" href="/">Se admiten humanos</a><span class="badge">Gratis y open source</span></header>
     <main>
-      <section class="hero"><p class="eyebrow">Alertas de alquiler que van al grano</p><h1>Encontrar casa ya es bastante difícil.</h1><p class="lede">Dinos qué puedes pagar y dónde quieres vivir. Revisamos anuncios nuevos, descartamos prohibiciones explícitas de animales y te avisamos por Telegram.</p><div class="promise"><span>Sin “mascotas aceptadas” inventado</span><span>Sin anuncios duplicados</span><span>Sin vender tus datos</span></div></section>
-      <section class="panel"><div class="panel-head"><div><p class="step">Tu búsqueda</p><h2>{'Actualiza tus datos' if user else 'Cuéntanos qué necesitas'}</h2></div><p>{html.escape(session_note)}</p></div>{error_html}
+      <section class="hero"><p class="eyebrow">Alertas de alquiler que van al grano</p><h1>Encontrar casa ya es bastante difícil.</h1><p class="lede">Cuéntanos qué buscas. Revisamos anuncios nuevos, aplicamos tus criterios y te avisamos por Telegram para que puedas reaccionar a tiempo.</p><div class="promise"><span>Tus criterios, tu búsqueda</span><span>Sin anuncios duplicados</span><span>Sin vender tus datos</span></div></section>
+      <section class="panel"><div class="panel-head"><p class="step">Tu búsqueda</p><h2>{'Actualiza tus datos' if user else 'Cuéntanos qué necesitas'}</h2><p>{html.escape(session_note)}</p></div>{error_html}
       <form method="post" action="/profile"><input type="hidden" name="csrf_token" value="{html.escape(csrf, quote=True)}">
         <fieldset><legend>1 · Presupuesto y zona</legend><div class="grid">
-          <label>Presupuesto preferido al mes (€)<input required type="number" min="300" max="10000" name="max_rent_eur" value="{_value(form, 'max_rent_eur', 950)}"></label>
-          <label>Máximo excepcional (€)<small>Opcional; solo se usa en modo urgente.</small><input type="number" min="300" max="10000" name="stretch_max_rent_eur" value="{_value(form, 'stretch_max_rent_eur')}" placeholder="1000"></label>
-          <label>Dormitorios preferidos<input required type="number" min="0" max="10" name="preferred_min_bedrooms" value="{_value(form, 'preferred_min_bedrooms', 1)}"></label>
+          <label>Presupuesto preferido al mes (€)<input required type="number" min="300" max="10000" name="max_rent_eur" value="{_value(form, 'max_rent_eur')}"></label>
+          <label>Máximo excepcional (€)<small>Opcional; solo se usa en modo urgente.</small><input type="number" min="300" max="10000" name="stretch_max_rent_eur" value="{_value(form, 'stretch_max_rent_eur')}" placeholder="Ej. 1000"></label>
+          <label>Dormitorios preferidos<input required type="number" min="0" max="10" name="preferred_min_bedrooms" value="{_value(form, 'preferred_min_bedrooms')}"></label>
           <label class="wide">Distritos aceptables <small>Déjalo vacío para todo Madrid; separa varios con comas.</small><input name="acceptable_districts" value="{_value(form, 'acceptable_districts')}" placeholder="Centro, Chamberí, Retiro…"></label>
           <label>Mobiliario<select name="furnished"><option value="any"{' selected' if furnished == 'any' else ''}>Me da igual</option><option value="yes"{' selected' if furnished == 'yes' else ''}>Amueblado</option><option value="no"{' selected' if furnished == 'no' else ''}>Sin amueblar</option></select></label>
-          <label>Tipo de alquiler<select name="rental_duration"><option value="long_term"{' selected' if rental_duration == 'long_term' else ''}>Larga duración</option><option value="temporary"{' selected' if rental_duration == 'temporary' else ''}>Temporal / por temporada</option><option value="both"{' selected' if rental_duration == 'both' else ''}>Ambos</option></select></label>
+          <label>Tipo de alquiler<select required name="rental_duration"><option value="" disabled{' selected' if not rental_duration else ''}>Elige una opción</option><option value="long_term"{' selected' if rental_duration == 'long_term' else ''}>Larga duración</option><option value="temporary"{' selected' if rental_duration == 'temporary' else ''}>Temporal / por temporada</option><option value="both"{' selected' if rental_duration == 'both' else ''}>Ambos</option></select></label>
           <label>Fecha límite de entrada <small>Opcional</small><input type="date" name="move_in_by" value="{_value(form, 'move_in_by')}"></label>
         </div><div class="option-groups">
           <section class="option-group"><h3>Urgencia</h3><div class="option-list"><label><input type="checkbox" name="urgent"{_checked(urgent)}><span>Avisarme también de oportunidades hasta mi máximo excepcional</span></label></div></section>
@@ -483,16 +484,16 @@ def _profile_page(
           <label>Trabajo<input maxlength="160" name="job" value="{_value(form, 'job')}" placeholder="Stage manager, docente…"></label>
           <label class="wide">Tipo de contrato<input maxlength="120" name="contract_type" value="{_value(form, 'contract_type')}" placeholder="Indefinido, autónomo…"></label>
         </div></fieldset>
-        <fieldset><legend>3 · Animales</legend><div class="grid">
-          <label>¿Cuántos viven contigo?<input required type="number" min="0" max="10" name="pet_count" value="{_value(form, 'pet_count', 0)}"></label>
-          <label>¿Qué animales son?<input maxlength="80" name="pet_species" value="{_value(form, 'pet_species', 'gato')}" placeholder="gato, perro…"></label>
+        <fieldset><legend>3 · Animales <span class="optional">Opcional</span></legend><p class="section-intro">Si convivirán contigo, los tendremos en cuenta al revisar cada anuncio.</p><div class="grid">
+          <label>¿Cuántos vivirían contigo?<input type="number" min="0" max="10" name="pet_count" value="{_value(form, 'pet_count')}"></label>
+          <label>¿Qué animales son?<input maxlength="80" name="pet_species" value="{_value(form, 'pet_species')}" placeholder="Gato, perro…"></label>
           <label class="wide">Algo útil sobre ellos <small>Opcional</small><textarea maxlength="300" name="pet_notes" placeholder="Edad, tamaño, comportamiento…">{_value(form, 'pet_notes')}</textarea></label>
         </div></fieldset>
         <button class="primary" type="submit">Guardar y conectar Telegram →</button>
       </form>
       {f'<form method="post" action="/logout" class="logout"><input type="hidden" name="csrf_token" value="{html.escape(csrf, quote=True)}"><button type="submit">Cerrar sesión en este navegador</button></form>' if user else ''}
       </section>
-      <section class="how"><p class="eyebrow">Cómo funciona</p><h2>Rápido, pero honesto.</h2><div class="cards"><article><b>01</b><h3>Buscamos</h3><p>Consultamos fuentes autorizadas y webs de agencias con controles para detectar cambios.</p></article><article><b>02</b><h3>Filtramos</h3><p>Aplicamos tu presupuesto y tus preferencias. El silencio sobre animales siempre significa “no especificado”.</p></article><article><b>03</b><h3>Te avisamos</h3><p>Recibes el anuncio y la evidencia en Telegram para abrirlo y responder en dos toques.</p></article></div></section>
+      <section class="how"><p class="eyebrow">Cómo funciona</p><h2>Rápido, pero honesto.</h2><div class="cards"><article><b>01</b><h3>Buscamos</h3><p>Consultamos fuentes autorizadas y webs de agencias con controles para detectar cambios.</p></article><article><b>02</b><h3>Filtramos</h3><p>Aplicamos presupuesto, zona, tipo de alquiler y demás preferencias sin inventar información que el anuncio no da.</p></article><article><b>03</b><h3>Te avisamos</h3><p>Recibes el anuncio y la evidencia en Telegram para abrirlo y responder en dos toques.</p></article></div></section>
     </main>"""
     return _layout("Tu búsqueda · Se admiten humanos", body)
 
@@ -503,12 +504,12 @@ def _saved_page(state: PageState, telegram_url: str, error: str) -> str:
     budget_text = f"Presupuesto preferido: <strong>{state.search.max_rent_eur} €</strong>"
     if state.search.urgent and state.search.stretch_max_rent_eur is not None:
         budget_text += f"; sugerencias urgentes hasta <strong>{state.search.stretch_max_rent_eur} €</strong>"
-    body = f"""<header><a class="brand" href="/">Se admiten humanos <span>🐾</span></a><span class="badge">Búsqueda guardada</span></header><main class="center"><section class="success"><div class="success-mark">✓</div><p class="eyebrow">Ya sabemos qué buscar</p><h1>Tu búsqueda está lista.</h1><p>{budget_text} al mes en Madrid. Ahora conecta Telegram para recibir solamente los anuncios que encajen contigo.</p>{action}<small>El enlace de Telegram caduca en 10 minutos y solo funciona una vez.</small><a href="/">← Revisar o cambiar mis datos</a></section></main>"""
+    body = f"""<header><a class="brand" href="/">Se admiten humanos</a><span class="badge">Búsqueda guardada</span></header><main class="center"><section class="success"><div class="success-mark">✓</div><p class="eyebrow">Ya sabemos qué buscar</p><h1>Tu búsqueda está lista.</h1><p>{budget_text} al mes en Madrid. Ahora conecta Telegram para recibir solamente los anuncios que encajen contigo.</p>{action}<small>El enlace de Telegram caduca en 10 minutos y solo funciona una vez.</small><a href="/">← Revisar o cambiar mis datos</a></section></main>"""
     return _layout("Búsqueda guardada · Se admiten humanos", body)
 
 
 def _telegram_page(url: str) -> str:
-    return _layout("Conectar Telegram · Se admiten humanos", f"""<header><a class="brand" href="/">Se admiten humanos <span>🐾</span></a></header><main class="center"><section class="success"><p class="eyebrow">Último paso</p><h1>Conecta Telegram.</h1><p>Este enlace es personal, caduca en 10 minutos y solo se puede usar una vez.</p><a class="primary button" href="{html.escape(url, quote=True)}">Abrir Telegram →</a><a href="/">← Volver a mi búsqueda</a></section></main>""")
+    return _layout("Conectar Telegram · Se admiten humanos", f"""<header><a class="brand" href="/">Se admiten humanos</a></header><main class="center"><section class="success"><p class="eyebrow">Último paso</p><h1>Conecta Telegram.</h1><p>Este enlace es personal, caduca en 10 minutos y solo se puede usar una vez.</p><a class="primary button" href="{html.escape(url, quote=True)}">Abrir Telegram →</a><a href="/">← Volver a mi búsqueda</a></section></main>""")
 
 
 def _message_page(title: str, message: str) -> str:
@@ -516,11 +517,10 @@ def _message_page(title: str, message: str) -> str:
 
 
 def _layout(title: str, body: str) -> str:
-    return f"""<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{html.escape(title)}</title><meta name="description" content="Alertas gratuitas y open source para encontrar alquiler en Madrid con animales."><style>{_CSS}</style></head><body>{body}<footer><p>Hecho para ayudar, no para ganar dinero. <a href="https://github.com/Algarciap/se-admiten-humanos">Código libre y abierto</a>.</p><p>No afirmamos que se admitan animales si el anuncio no lo dice.</p></footer></body></html>"""
+    return f"""<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{html.escape(title)}</title><meta name="description" content="Alertas gratuitas y open source para encontrar alquiler antes y con menos ruido."><style>{_CSS}</style></head><body>{body}<footer><p>Hecho para ayudar, no para ganar dinero. <a href="https://github.com/Algarciap/se-admiten-humanos">Código libre y abierto</a>.</p><p>Tus preferencias mandan; no inventamos información que el anuncio no da.</p></footer></body></html>"""
 
 
 _CSS = """
 :root{--ink:#17231c;--paper:#f5f1e8;--card:#fffdf8;--green:#1f5c45;--lime:#d9ef9f;--coral:#ef765b;--line:#cfd5c9;--muted:#5d685f}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.5}header{max-width:1180px;margin:auto;padding:28px 24px;display:flex;align-items:center;justify-content:space-between}.brand{font-family:Georgia,serif;font-size:1.35rem;font-weight:700;color:var(--ink);text-decoration:none}.brand span{font-size:1rem}.badge{background:var(--lime);padding:7px 12px;border-radius:999px;font-size:.78rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em}main{max-width:1180px;margin:auto;padding:30px 24px 90px}.hero{max-width:880px;padding:72px 0 62px}.eyebrow,.step{text-transform:uppercase;letter-spacing:.13em;font-weight:900;font-size:.75rem;color:var(--green)}h1,h2,h3{font-family:Georgia,serif;line-height:1.04;margin:.25em 0}h1{font-size:clamp(3rem,8vw,6.7rem);letter-spacing:-.055em}.lede{font-size:clamp(1.1rem,2vw,1.4rem);max-width:760px;color:var(--muted)}.promise{display:flex;flex-wrap:wrap;gap:9px;margin-top:28px}.promise span{border:1px solid var(--ink);border-radius:999px;padding:7px 12px;font-size:.85rem}.panel{background:var(--card);border:1px solid var(--ink);box-shadow:9px 9px 0 var(--ink);padding:clamp(22px,5vw,54px)}.panel-head{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:end;border-bottom:1px solid var(--line);padding-bottom:28px}.panel-head h2,.how h2{font-size:clamp(2rem,5vw,4rem)}.panel-head>p{color:var(--muted);max-width:450px}fieldset{border:0;padding:38px 0;margin:0;border-bottom:1px solid var(--line)}legend{font-weight:900;font-size:1.05rem;margin-bottom:20px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}.wide{grid-column:1/-1}label{display:flex;flex-direction:column;gap:7px;font-size:.9rem;font-weight:750}label small,.success small{color:var(--muted);font-weight:400}input,select,textarea{width:100%;border:1px solid #99a298;background:#fff;padding:13px 14px;border-radius:4px;color:var(--ink);font:inherit}input:focus,select:focus,textarea:focus{outline:3px solid var(--lime);border-color:var(--green)}textarea{min-height:90px;resize:vertical}.checks{display:flex;flex-wrap:wrap;gap:18px;margin-top:22px}.checks label{flex-direction:row;align-items:center;font-weight:600}.checks input{width:auto}.primary,.button{display:inline-block;margin-top:30px;background:var(--green);color:white;border:1px solid var(--green);padding:15px 20px;border-radius:4px;font:inherit;font-weight:900;text-decoration:none;cursor:pointer}.primary:hover{background:#174534}.secondary{background:transparent;color:var(--ink);border:1px solid var(--ink)}.error{background:#ffe4dc;border-left:5px solid var(--coral);padding:14px 16px;margin:24px 0}.logout{margin-top:22px}.logout button{border:0;background:none;text-decoration:underline;color:var(--muted);cursor:pointer}.how{padding:110px 0 20px}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.cards article{border-top:2px solid var(--ink);padding-top:20px}.cards b{color:var(--coral)}.cards h3{font-size:1.7rem}.cards p{color:var(--muted)}.center{min-height:70vh;display:grid;place-items:center}.success{max-width:700px;text-align:center;background:var(--card);border:1px solid var(--ink);box-shadow:9px 9px 0 var(--ink);padding:clamp(30px,7vw,70px)}.success h1{font-size:clamp(2.8rem,7vw,5rem)}.success p{font-size:1.15rem;color:var(--muted)}.success .button{display:block;margin:28px auto 16px;max-width:340px}.success>a:last-child{display:block;margin-top:25px;color:var(--ink)}.success-mark{margin:auto;width:52px;height:52px;display:grid;place-items:center;border-radius:50%;background:var(--lime);font-size:1.7rem;font-weight:900}footer{border-top:1px solid var(--line);max-width:1180px;margin:auto;padding:35px 24px 60px;display:flex;justify-content:space-between;gap:30px;color:var(--muted);font-size:.85rem}footer a{color:var(--ink)}@media(max-width:720px){header{align-items:flex-start}.badge{font-size:.65rem}.hero{padding-top:38px}.panel-head,.grid,.cards{grid-template-columns:1fr}.wide{grid-column:auto}.panel{box-shadow:5px 5px 0 var(--ink)}footer{display:block}h1{font-size:3.25rem}}
-.panel{padding:clamp(22px,4vw,46px)}.panel-head{padding-bottom:24px}fieldset{padding:30px 0}legend{margin-bottom:16px}.grid{gap:15px 18px}.grid>label{align-self:end}input,select,textarea{padding:10px 12px}textarea{min-height:78px}.option-groups{display:grid;grid-template-columns:1.25fr .8fr 1.25fr;gap:12px;margin-top:18px;align-items:start}.option-group{background:#fff;border:1px solid var(--line);border-radius:4px;padding:13px 14px}.option-group h3{font-family:inherit;font-size:.72rem;line-height:1.2;margin:0 0 10px;color:var(--green);text-transform:uppercase;letter-spacing:.1em}.option-list{display:grid;gap:9px}.option-list label{display:grid;grid-template-columns:17px minmax(0,1fr);gap:8px;align-items:start;font-weight:600;line-height:1.3}.option-list input{width:15px;height:15px;margin:2px 0 0;padding:0}.option-note{display:block;margin-top:11px;color:var(--muted);font-size:.8rem}.primary,.button{padding:13px 18px}@media(max-width:800px){.option-groups{grid-template-columns:1fr 1fr}.option-group:last-child{grid-column:1/-1}}@media(max-width:720px){.option-groups{grid-template-columns:1fr}.option-group:last-child{grid-column:auto}}
-.panel{padding:clamp(22px,4vw,46px)}.panel-head{padding-bottom:24px}fieldset{padding:14px 0 24px}legend{margin-bottom:0}.grid{gap:13px 18px}.grid>label{align-self:end}label{gap:5px}input,select,textarea{padding:10px 12px}textarea{min-height:78px}.option-groups{display:grid;grid-template-columns:1.25fr .8fr 1.25fr;gap:12px;margin-top:16px;align-items:start}.option-group{background:#fff;border:1px solid var(--line);border-radius:4px;padding:13px 14px}.option-group h3{font-family:inherit;font-size:.72rem;line-height:1.2;margin:0 0 10px;color:var(--green);text-transform:uppercase;letter-spacing:.1em}.option-list{display:grid;gap:9px}.option-list label{display:grid;grid-template-columns:17px minmax(0,1fr);gap:8px;align-items:start;font-weight:600;line-height:1.3}.option-list input{width:15px;height:15px;margin:2px 0 0;padding:0}.option-note{display:block;margin-top:11px;color:var(--muted);font-size:.8rem}.primary,.button{padding:13px 18px}@media(max-width:800px){.option-groups{grid-template-columns:1fr 1fr}.option-group:last-child{grid-column:1/-1}}@media(max-width:720px){.option-groups{grid-template-columns:1fr}.option-group:last-child{grid-column:auto}}
+.panel{padding:clamp(22px,4vw,46px)}.panel-head{display:block;padding-bottom:22px}.panel-head>.step{color:var(--green);max-width:none;margin:0}.panel-head h2{font-size:clamp(2.2rem,5vw,3.7rem);margin:.18em 0}.panel-head>p:last-child{max-width:680px;margin:10px 0 0}fieldset{padding:14px 0 24px}legend{margin-bottom:0}.optional{margin-left:6px;color:var(--muted);font-size:.72rem;font-weight:500}.section-intro{margin:8px 0 13px;color:var(--muted);font-size:.86rem}.grid{gap:13px 18px}.grid>label{align-self:end}label{gap:5px}input,select,textarea{padding:10px 12px}textarea{min-height:78px}.option-groups{display:grid;grid-template-columns:1.25fr .8fr 1.25fr;gap:12px;margin-top:16px;align-items:start}.option-group{background:#fff;border:1px solid var(--line);border-radius:4px;padding:13px 14px}.option-group h3{font-family:inherit;font-size:.72rem;line-height:1.2;margin:0 0 10px;color:var(--green);text-transform:uppercase;letter-spacing:.1em}.option-list{display:grid;gap:9px}.option-list label{display:grid;grid-template-columns:17px minmax(0,1fr);gap:8px;align-items:start;font-weight:600;line-height:1.3}.option-list input{width:15px;height:15px;margin:2px 0 0;padding:0}.option-note{display:block;margin-top:11px;color:var(--muted);font-size:.8rem}.primary,.button{padding:13px 18px}@media(max-width:800px){.option-groups{grid-template-columns:1fr 1fr}.option-group:last-child{grid-column:1/-1}}@media(max-width:720px){.option-groups{grid-template-columns:1fr}.option-group:last-child{grid-column:auto}}
 """

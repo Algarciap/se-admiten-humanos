@@ -176,6 +176,40 @@ class WebTests(unittest.TestCase):
         self.assertIn("Presupuesto preferido al mes (€)", page)
         self.assertNotIn("Presupuesto preferido al mes <span>€</span>", page)
 
+    def test_first_visit_has_no_search_assumptions(self):
+        status, _, page = self.request()
+
+        self.assertEqual(status, "200 OK")
+        self.assertIn('name="max_rent_eur" value=""', page)
+        self.assertIn('name="preferred_min_bedrooms" value=""', page)
+        self.assertIn('name="pet_count" value=""', page)
+        self.assertIn('name="pet_species" value=""', page)
+        self.assertNotIn('name="property_type_home" checked', page)
+        self.assertNotIn('name="allow_studios" checked', page)
+        self.assertNotIn('name="allow_unknown_bedrooms" checked', page)
+        self.assertNotIn('name="move_in_asap" checked', page)
+        self.assertIn('<option value="" disabled selected>Elige una opción</option>', page)
+        self.assertIn("Tus criterios, tu búsqueda", page)
+
+    def test_animals_are_optional(self):
+        _, headers, _ = self.request()
+        csrf = self.response_cookies(headers)["humanos_csrf"]
+        form = self.valid_form(csrf)
+        form["pet_count"] = ""
+        form["pet_species"] = ""
+        form["pet_notes"] = ""
+
+        status, _, _ = self.request(
+            "POST", "/profile", form, f"humanos_csrf={csrf}"
+        )
+
+        self.assertEqual(status, "200 OK")
+        with RentalStore(self.database) as store:
+            profiles = store.load_enabled_search_profiles()
+            renter = store.load_primary_renter_profile(profiles[0].user_id)
+            self.assertFalse(profiles[0].requires_pet_acceptance)
+            self.assertEqual(renter.pets, ())
+
 
 if __name__ == "__main__":
     unittest.main()
