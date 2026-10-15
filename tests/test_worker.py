@@ -341,6 +341,29 @@ class WorkerTests(unittest.TestCase):
         self.assertIn("parser contract changed", result.source_errors[0])
         self.assertEqual(result.sources[0].source_id, "healthy")
         self.assertEqual(healthy.discovery_calls, 1)
+        with RentalStore(self.database) as store:
+            broken_health = store.source_health("broken")
+            healthy_health = store.source_health("healthy")
+            self.assertEqual(broken_health.consecutive_failures, 1)
+            self.assertIn("parser contract changed", broken_health.last_error)
+            self.assertEqual(healthy_health.alert_state, "healthy")
+
+    def test_zero_inventory_is_a_visible_source_alarm(self):
+        empty_source = MutableSource([])
+        empty_source.source_id = "unexpectedly-empty"
+
+        result = run_worker_sources_cycle(
+            self.settings,
+            self.environment,
+            sources=(empty_source,),
+        )
+
+        self.assertEqual(result.status, "partial_failure")
+        self.assertIn("zero listings", result.source_errors[0])
+        with RentalStore(self.database) as store:
+            health = store.source_health("unexpectedly-empty")
+            self.assertEqual(health.alert_state, "zero_results")
+            self.assertEqual(health.last_listing_count, 0)
 
 
 if __name__ == "__main__":

@@ -73,7 +73,8 @@ python -m se_admiten_humanos run-web
 ```
 
 Production uses `run-service`, which serves HTTP on Railway's `PORT` while the single background
-thread continues three-minute property checks. `/health` is the deployment health endpoint.
+thread continues three-minute property checks. `/health` is the deployment health endpoint. A
+separate password-protected `/status` view reports only source health and never user or search data.
 6. An approved outreach message is drafted. Automatic delivery is enabled only for explicitly
    allow-listed direct agency email channels.
 
@@ -106,7 +107,8 @@ personal WhatsApp accounts, or send messages through unsupported portal APIs.
 - Tested Telegram delivery adapter with database-backed per-user destinations, atomic claims,
   retries, and an actionable listing button; different budgets route to different private chats.
 - Railway-ready background worker with safe first-boot profile import, no-alert website baseline,
-  three-minute polling, persistent SQLite state, and visible repeated-failure exits.
+  three-minute polling, persistent SQLite state, per-source health history, low-noise operator
+  alerts, and visible repeated-failure exits.
 - Idealista API access and quota confirmation remain pending. Wolo, Testa Homes, and Vivenio remain
   in the registry but their background parsers are disabled until written permission is obtained. Fotocasa is deliberately
   excluded from the initial deployment.
@@ -186,6 +188,12 @@ zero messages. Later cycles process only newly discovered listing IDs through th
 matching, deduplication, and Telegram pipeline. Configuration errors stop immediately; transient
 failures are logged and the process exits after three consecutive failures so Railway can restart it
 visibly.
+
+Each source stores its last attempt, last success, total inventory count, consecutive failures, and
+sanitized error. One transient failure stays quiet; the third consecutive failure alerts the operator
+in Telegram. A sudden zero-total inventory or a stale source alerts independently, and the first
+successful scan afterward sends one recovery message. `MONITORING_TELEGRAM_CHAT_ID` selects the
+operator chat; the legacy `TELEGRAM_CHAT_ID` is used as a fallback for the initial deployment.
 
 See [`docs/railway.md`](docs/railway.md) for the exact volume, variables, deployment, verification,
 and local-scheduler handover procedure. Never commit the Telegram token, chat id, private profile,

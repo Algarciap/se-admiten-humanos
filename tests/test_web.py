@@ -1,6 +1,7 @@
 """End-to-end WSGI tests for public onboarding."""
 
 import io
+import base64
 import tempfile
 import unittest
 from http.cookies import SimpleCookie
@@ -26,7 +27,7 @@ class WebTests(unittest.TestCase):
     def tearDown(self):
         self.temporary_directory.cleanup()
 
-    def request(self, method="GET", path="/", form=None, cookies=""):
+    def request(self, method="GET", path="/", form=None, cookies="", authorization=""):
         payload = urlencode(form or {}).encode()
         captured = {}
 
@@ -40,6 +41,7 @@ class WebTests(unittest.TestCase):
             "CONTENT_TYPE": "application/x-www-form-urlencoded",
             "CONTENT_LENGTH": str(len(payload)),
             "HTTP_COOKIE": cookies,
+            "HTTP_AUTHORIZATION": authorization,
             "wsgi.input": io.BytesIO(payload),
         }
         body = b"".join(self.app(environ, start_response)).decode()
@@ -165,6 +167,42 @@ class WebTests(unittest.TestCase):
         self.assertEqual(status, "200 OK")
         self.assertEqual(body, '{"status": "ok"}')
         self.assertIn(("Content-Type", "application/json; charset=utf-8"), headers)
+
+    def test_status_page_is_disabled_without_a_password(self):
+        status, _, body = self.request(path="/status")
+
+        self.assertEqual(status, "404 Not Found")
+        self.assertNotIn("Estado de las fuentes", body)
+
+    def test_status_page_requires_basic_auth_and_exposes_no_user_data(self):
+        self.app = WebApplication(
+            WebSettings(
+                database_path=str(self.database),
+                bot_username="SeAdmitenHumanosBot",
+                secure_cookies=False,
+                status_page_token="monitor-secret-at-least-24",
+            )
+        )
+        with RentalStore(self.database) as store:
+            store.record_source_success("redpiso", "succeeded", 286)
+
+        status, headers, _ = self.request(path="/status")
+        self.assertEqual(status, "401 Unauthorized")
+        self.assertIn(
+            ("WWW-Authenticate", 'Basic realm="Source status"'),
+            headers,
+        )
+
+        credentials = base64.b64encode(b"admin:monitor-secret-at-least-24").decode()
+        status, _, body = self.request(
+            path="/status",
+            authorization=f"Basic {credentials}",
+        )
+        self.assertEqual(status, "200 OK")
+        self.assertIn("Estado de las fuentes", body)
+        self.assertIn("Redpiso", body)
+        self.assertIn("286", body)
+        self.assertNotIn("ana@example.com", body)
 
     def test_search_options_are_grouped_in_compact_sections(self):
         status, _, page = self.request()

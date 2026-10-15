@@ -8,6 +8,7 @@ Railway combined web + worker service (one replica)
     ├── polls the official Idealista API every 900 seconds when credentials exist
     ├── accepts user-owned search profiles over HTTPS
     ├── sends eligible new listings to Telegram
+    ├── records and alerts on per-source health transitions
     └── reads/writes /data/rentals.sqlite3
                       │
                 Railway volume
@@ -26,9 +27,9 @@ multiple concurrent workers or a public multi-user website.
 4. Mount the volume at exactly `/data`.
 5. Keep the service at one replica.
 
-The committed `Dockerfile` installs the package and starts `se-admiten-humanos run-worker`.
-`railway.toml` uses the `Always` restart policy. The service is a background worker and therefore
-does not expose a public HTTP port or health-check endpoint.
+The committed `Dockerfile` installs the package and starts `se-admiten-humanos run-service`.
+`railway.toml` uses the `Always` restart policy and checks `/health`. The same single process serves
+the public onboarding site while a background thread owns the polling loop.
 
 ## 2. Add sealed variables
 
@@ -41,13 +42,17 @@ private.
 | `POLL_INTERVAL_SECONDS` | `180` |
 | `MAX_LISTINGS_PER_RUN` | `50` |
 | `MAX_CONSECUTIVE_FAILURES` | `3` |
+| `SOURCE_FAILURE_ALERT_THRESHOLD` | Consecutive source failures before an operator alert; default `3` |
+| `SOURCE_STALE_AFTER_SECONDS` | Seconds without a successful source check before alerting; default `1800` |
 | `TELEGRAM_BOT_TOKEN` | BotFather token |
 | `TELEGRAM_BOT_USERNAME` | Bot username without `@`; enables secure `/start` link polling |
 | `PORT` | Injected automatically by Railway; local default is `8080` |
 | `WEB_COOKIE_SECURE` | Keep `true` in production |
 | `TELEGRAM_CHAT_ID` | Legacy bootstrap: first user's numeric private chat id |
+| `MONITORING_TELEGRAM_CHAT_ID` | Operator's numeric private chat id; falls back to legacy `TELEGRAM_CHAT_ID` |
 | `TELEGRAM_USER_ID` | Legacy bootstrap: first user's application id |
 | `PROFILE_BUNDLE_JSON` | Entire private profile file as one JSON value |
+| `STATUS_PAGE_TOKEN` | Strong password enabling the protected `/status` operations page |
 | `IDEALISTA_API_KEY` | Approved Idealista Search API key; omit until access is granted |
 | `IDEALISTA_API_SECRET` | Matching Idealista secret; must be configured with the key |
 | `IDEALISTA_POLL_INTERVAL_SECONDS` | Idealista-only cadence; default `900` to conserve quota |
@@ -88,6 +93,12 @@ The container now runs `se-admiten-humanos run-service`. Railway routes HTTPS tr
 Railway domain under the service's Networking settings and share that HTTPS URL only after testing a
 complete form submission and Telegram connection. Do not set `WEB_COOKIE_SECURE=false` in Railway.
 
+When `STATUS_PAGE_TOKEN` is configured, `/status` uses HTTP Basic authentication with username
+`admin` and that token as the password. The page contains source names, health, inventory totals,
+failure counts, and sanitized technical errors only. It deliberately excludes users, Telegram chat
+ids, and search criteria. Without the variable, the route returns `404` rather than exposing an
+unprotected dashboard.
+
 The onboarding session is currently tied to one browser. Email verification, cross-device sign-in,
 account recovery, abuse controls, and administrative deletion tools are required before broad public
 promotion; this release is suitable for a small invited pilot.
@@ -124,6 +135,8 @@ end-to-end production confirmation.
 - A failed Telegram delivery remains retryable and the discovery is not acknowledged as complete.
 - A Telegram account-link polling error is reported separately and does not delay property checks.
 - Parser contract changes fail visibly instead of turning a changed page into a false empty result.
+- Source health survives restarts in SQLite. Repeated failures alert once, zero-total inventory
+  alerts immediately, stale success alerts once, and recovery sends one follow-up.
 - Removing or replacing the volume creates a fresh database and therefore a fresh baseline. Treat
   that as a recovery operation, not routine deployment.
 

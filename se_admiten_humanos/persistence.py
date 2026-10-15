@@ -16,7 +16,7 @@ from .models import Listing, Pet, PetDecision, PropertyType, RentalDuration, Ren
 from .search_profile import SearchDecision, SearchProfile
 
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 _TELEGRAM_CHAT_ID = re.compile(r"-?[1-9][0-9]*")
 
@@ -165,6 +165,22 @@ class SourceRunRecord:
         return max(0, round((finished - started).total_seconds() * 1000))
 
 
+@dataclass(frozen=True, slots=True)
+class SourceHealthRecord:
+    """Durable operational health for one remote listing source."""
+
+    source_id: str
+    last_attempt_at: str
+    last_success_at: str | None
+    last_status: str
+    last_listing_count: int | None
+    consecutive_failures: int
+    last_error: str
+    alert_state: str
+    alerted_at: str | None
+    updated_at: str
+
+
 class RentalStore:
     """Persist global listings and user-isolated matching and delivery state."""
 
@@ -187,69 +203,38 @@ class RentalStore:
         version = self.connection.execute("pragma user_version").fetchone()[0]
         if version == 0:
             self._create_schema_v2()
-            self._migrate_v2_to_v3()
-            self._migrate_v3_to_v4()
-            self._migrate_v4_to_v5()
-            self._migrate_v5_to_v6()
-            self._migrate_v6_to_v7()
-            self._migrate_v7_to_v8()
-            self._migrate_v8_to_v9()
-            self._migrate_v9_to_v10()
+            version = 2
         elif version == 1:
             self._migrate_v1_to_v2()
+            version = 2
+        if version == 2:
             self._migrate_v2_to_v3()
+            version = 3
+        if version == 3:
             self._migrate_v3_to_v4()
+            version = 4
+        if version == 4:
             self._migrate_v4_to_v5()
+            version = 5
+        if version == 5:
             self._migrate_v5_to_v6()
+            version = 6
+        if version == 6:
             self._migrate_v6_to_v7()
+            version = 7
+        if version == 7:
             self._migrate_v7_to_v8()
+            version = 8
+        if version == 8:
             self._migrate_v8_to_v9()
+            version = 9
+        if version == 9:
             self._migrate_v9_to_v10()
-        elif version == 2:
-            self._migrate_v2_to_v3()
-            self._migrate_v3_to_v4()
-            self._migrate_v4_to_v5()
-            self._migrate_v5_to_v6()
-            self._migrate_v6_to_v7()
-            self._migrate_v7_to_v8()
-            self._migrate_v8_to_v9()
-            self._migrate_v9_to_v10()
-        elif version == 3:
-            self._migrate_v3_to_v4()
-            self._migrate_v4_to_v5()
-            self._migrate_v5_to_v6()
-            self._migrate_v6_to_v7()
-            self._migrate_v7_to_v8()
-            self._migrate_v8_to_v9()
-            self._migrate_v9_to_v10()
-        elif version == 4:
-            self._migrate_v4_to_v5()
-            self._migrate_v5_to_v6()
-            self._migrate_v6_to_v7()
-            self._migrate_v7_to_v8()
-            self._migrate_v8_to_v9()
-            self._migrate_v9_to_v10()
-        elif version == 5:
-            self._migrate_v5_to_v6()
-            self._migrate_v6_to_v7()
-            self._migrate_v7_to_v8()
-            self._migrate_v8_to_v9()
-            self._migrate_v9_to_v10()
-        elif version == 6:
-            self._migrate_v6_to_v7()
-            self._migrate_v7_to_v8()
-            self._migrate_v8_to_v9()
-            self._migrate_v9_to_v10()
-        elif version == 7:
-            self._migrate_v7_to_v8()
-            self._migrate_v8_to_v9()
-            self._migrate_v9_to_v10()
-        elif version == 8:
-            self._migrate_v8_to_v9()
-            self._migrate_v9_to_v10()
-        elif version == 9:
-            self._migrate_v9_to_v10()
-        elif version != SCHEMA_VERSION:
+            version = 10
+        if version == 10:
+            self._migrate_v10_to_v11()
+            version = 11
+        if version != SCHEMA_VERSION:
             raise RuntimeError(
                 f"Unsupported database schema version {version}; expected {SCHEMA_VERSION}"
             )
@@ -528,6 +513,188 @@ class RentalStore:
             """
         )
         self.connection.commit()
+
+    def _migrate_v10_to_v11(self) -> None:
+        self.connection.executescript(
+            """
+            create table if not exists source_health (
+                source_id text primary key,
+                last_attempt_at text not null,
+                last_success_at text,
+                last_status text not null,
+                last_listing_count integer check (
+                    last_listing_count is null or last_listing_count >= 0
+                ),
+                consecutive_failures integer not null default 0
+                    check (consecutive_failures >= 0),
+                last_error text not null default '',
+                alert_state text not null default 'healthy'
+                    check (alert_state in ('healthy', 'failing', 'zero_results', 'stale')),
+                alerted_at text,
+                updated_at text not null
+            );
+
+            pragma user_version = 11;
+            """
+        )
+        self.connection.commit()
+
+    @staticmethod
+    def _source_health_record(row: sqlite3.Row | tuple[object, ...]) -> SourceHealthRecord:
+        return SourceHealthRecord(
+            source_id=str(row[0]),
+            last_attempt_at=str(row[1]),
+            last_success_at=None if row[2] is None else str(row[2]),
+            last_status=str(row[3]),
+            last_listing_count=None if row[4] is None else int(row[4]),
+            consecutive_failures=int(row[5]),
+            last_error=str(row[6]),
+            alert_state=str(row[7]),
+            alerted_at=None if row[8] is None else str(row[8]),
+            updated_at=str(row[9]),
+        )
+
+    def source_health(self, source_id: str) -> SourceHealthRecord | None:
+        normalized_source_id = source_id.strip().casefold()
+        if not normalized_source_id:
+            raise ValueError("Source id cannot be empty")
+        row = self.connection.execute(
+            """
+            select source_id, last_attempt_at, last_success_at, last_status,
+                   last_listing_count, consecutive_failures, last_error,
+                   alert_state, alerted_at, updated_at
+            from source_health where source_id = ?
+            """,
+            (normalized_source_id,),
+        ).fetchone()
+        return None if row is None else self._source_health_record(row)
+
+    def list_source_health(self) -> tuple[SourceHealthRecord, ...]:
+        rows = self.connection.execute(
+            """
+            select source_id, last_attempt_at, last_success_at, last_status,
+                   last_listing_count, consecutive_failures, last_error,
+                   alert_state, alerted_at, updated_at
+            from source_health order by source_id
+            """
+        ).fetchall()
+        return tuple(self._source_health_record(row) for row in rows)
+
+    def record_source_success(
+        self,
+        source_id: str,
+        status: str,
+        listing_count: int,
+        *,
+        observed_at: datetime | None = None,
+    ) -> tuple[SourceHealthRecord, str]:
+        normalized_source_id = source_id.strip().casefold()
+        if not normalized_source_id or not status.strip():
+            raise ValueError("Source id and status cannot be empty")
+        if listing_count < 0:
+            raise ValueError("Listing count cannot be negative")
+        previous = self.source_health(normalized_source_id)
+        previous_alert_state = previous.alert_state if previous else "healthy"
+        now = (observed_at or datetime.now(UTC)).isoformat()
+        with self.connection:
+            self.connection.execute(
+                """
+                insert into source_health (
+                    source_id, last_attempt_at, last_success_at, last_status,
+                    last_listing_count, consecutive_failures, last_error,
+                    alert_state, alerted_at, updated_at
+                ) values (?, ?, ?, ?, ?, 0, '', 'healthy', null, ?)
+                on conflict(source_id) do update set
+                    last_attempt_at = excluded.last_attempt_at,
+                    last_success_at = excluded.last_success_at,
+                    last_status = excluded.last_status,
+                    last_listing_count = excluded.last_listing_count,
+                    consecutive_failures = 0,
+                    last_error = '',
+                    alert_state = 'healthy',
+                    alerted_at = null,
+                    updated_at = excluded.updated_at
+                """,
+                (normalized_source_id, now, now, status.strip(), listing_count, now),
+            )
+        record = self.source_health(normalized_source_id)
+        assert record is not None
+        return record, previous_alert_state
+
+    def record_source_failure(
+        self,
+        source_id: str,
+        status: str,
+        error: str,
+        *,
+        listing_count: int | None = None,
+        observed_at: datetime | None = None,
+    ) -> SourceHealthRecord:
+        normalized_source_id = source_id.strip().casefold()
+        if not normalized_source_id or not status.strip():
+            raise ValueError("Source id and status cannot be empty")
+        if listing_count is not None and listing_count < 0:
+            raise ValueError("Listing count cannot be negative")
+        now = (observed_at or datetime.now(UTC)).isoformat()
+        detail = error.strip()[:1000]
+        with self.connection:
+            self.connection.execute(
+                """
+                insert into source_health (
+                    source_id, last_attempt_at, last_success_at, last_status,
+                    last_listing_count, consecutive_failures, last_error,
+                    alert_state, alerted_at, updated_at
+                ) values (?, ?, null, ?, ?, 1, ?, 'healthy', null, ?)
+                on conflict(source_id) do update set
+                    last_attempt_at = excluded.last_attempt_at,
+                    last_status = excluded.last_status,
+                    last_listing_count = coalesce(
+                        excluded.last_listing_count,
+                        source_health.last_listing_count
+                    ),
+                    consecutive_failures = source_health.consecutive_failures + 1,
+                    last_error = excluded.last_error,
+                    updated_at = excluded.updated_at
+                """,
+                (normalized_source_id, now, status.strip(), listing_count, detail, now),
+            )
+        record = self.source_health(normalized_source_id)
+        assert record is not None
+        return record
+
+    def set_source_alert_state(
+        self,
+        source_id: str,
+        alert_state: str,
+        *,
+        observed_at: datetime | None = None,
+    ) -> SourceHealthRecord:
+        if alert_state not in {"healthy", "failing", "zero_results", "stale"}:
+            raise ValueError("Invalid source alert state")
+        normalized_source_id = source_id.strip().casefold()
+        now = (observed_at or datetime.now(UTC)).isoformat()
+        with self.connection:
+            cursor = self.connection.execute(
+                """
+                update source_health
+                set alert_state = ?, alerted_at = ?, updated_at = ?
+                where source_id = ?
+                """,
+                (alert_state, None if alert_state == "healthy" else now, now, normalized_source_id),
+            )
+        if cursor.rowcount != 1:
+            raise ValueError(f"Unknown source health record {normalized_source_id!r}")
+        record = self.source_health(normalized_source_id)
+        assert record is not None
+        return record
+
+    def website_source_discovery_count(self, source_id: str) -> int | None:
+        normalized_source_id = source_id.strip().casefold()
+        row = self.connection.execute(
+            "select last_discovery_count from website_source_state where source_id = ?",
+            (normalized_source_id,),
+        ).fetchone()
+        return None if row is None else int(row[0])
 
     def website_source_initialized(self, source_id: str) -> bool:
         """Return whether a website source has an explicit no-alert baseline."""

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import html
 import json
@@ -15,6 +17,7 @@ from urllib.parse import parse_qs
 from uuid import uuid4
 
 from .models import Pet, PropertyType, RentalDuration, RenterProfile, User
+from .monitoring import source_health_age_seconds
 from .persistence import RentalStore
 from .search_profile import SearchProfile
 from .telegram_linking import create_telegram_link
@@ -33,6 +36,7 @@ class WebSettings:
     bot_username: str
     secure_cookies: bool = True
     session_days: int = 30
+    status_page_token: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +66,27 @@ class WebApplication:
                     "200 OK",
                     json.dumps({"status": "ok"}),
                     content_type="application/json; charset=utf-8",
+                )
+            if path == "/status" and method == "GET":
+                if not self.settings.status_page_token:
+                    return self._error(start_response, "404 Not Found", "Página no encontrada.")
+                if not _valid_status_authorization(
+                    str(environ.get("HTTP_AUTHORIZATION", "")),
+                    self.settings.status_page_token,
+                ):
+                    return self._respond(
+                        start_response,
+                        "401 Unauthorized",
+                        _message_page(
+                            "Estado protegido",
+                            "Introduce la contraseña de monitorización para continuar.",
+                        ),
+                        extra_headers=(("WWW-Authenticate", 'Basic realm="Source status"'),),
+                    )
+                return self._respond(
+                    start_response,
+                    "200 OK",
+                    _status_page(store.list_source_health()),
                 )
             if path == "/" and method == "GET":
                 csrf = cookies.get(_CSRF_COOKIE) or secrets.token_urlsafe(24)
@@ -271,9 +296,11 @@ class WebApplication:
         *,
         content_type: str = "text/html; charset=utf-8",
         cookies: tuple[str, ...] = (),
+        extra_headers: tuple[tuple[str, str], ...] = (),
     ) -> list[bytes]:
         payload = body.encode("utf-8")
         headers = _security_headers(content_type, len(payload))
+        headers.extend(extra_headers)
         headers.extend(("Set-Cookie", cookie) for cookie in cookies)
         start_response(status, headers)
         return [payload]
@@ -348,6 +375,24 @@ def _valid_csrf(form: Mapping[str, str], cookies: Mapping[str, str]) -> bool:
     submitted = form.get("csrf_token", "")
     expected = cookies.get(_CSRF_COOKIE, "")
     return bool(submitted and expected and secrets.compare_digest(submitted, expected))
+
+
+def _valid_status_authorization(raw: str, expected_token: str) -> bool:
+    scheme, _, credentials = raw.strip().partition(" ")
+    if scheme.casefold() == "bearer":
+        return bool(credentials) and secrets.compare_digest(credentials, expected_token)
+    if scheme.casefold() != "basic" or not credentials:
+        return False
+    try:
+        decoded = base64.b64decode(credentials, validate=True).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError):
+        return False
+    username, separator, password = decoded.partition(":")
+    return (
+        bool(separator)
+        and secrets.compare_digest(username, "admin")
+        and secrets.compare_digest(password, expected_token)
+    )
 
 
 def _required(form: Mapping[str, str], key: str, label: str, maximum: int) -> str:
@@ -516,6 +561,64 @@ def _message_page(title: str, message: str) -> str:
     return _layout(title, f"<main class=\"center\"><section class=\"success\"><h1>{html.escape(title)}</h1><p>{html.escape(message)}</p><a class=\"button secondary\" href=\"/\">Volver</a></section></main>")
 
 
+def _status_page(records) -> str:
+    rows = []
+    labels = {
+        "alquiler_seguro": "Alquiler Seguro",
+        "tecnocasa": "Tecnocasa",
+        "redpiso": "Redpiso",
+        "nestar": "Nestar",
+        "idealista": "Idealista",
+    }
+    state_labels = {
+        "healthy": "Operativa",
+        "failing": "Con fallos",
+        "zero_results": "Cero viviendas",
+        "stale": "Sin éxito reciente",
+    }
+    for record in records:
+        age = source_health_age_seconds(record)
+        if age is None:
+            last_success = "Todavía ninguno"
+        elif age < 60:
+            last_success = "Hace menos de un minuto"
+        elif age < 3600:
+            last_success = f"Hace {age // 60} min"
+        else:
+            last_success = f"Hace {age // 3600} h"
+        count = "—" if record.last_listing_count is None else str(record.last_listing_count)
+        detail = record.last_error or "Sin errores"
+        rows.append(
+            "<tr>"
+            f"<th data-label=\"Fuente\">{html.escape(labels.get(record.source_id, record.source_id))}</th>"
+            f'<td data-label="Estado"><span class="health {html.escape(record.alert_state)}">{html.escape(state_labels.get(record.alert_state, record.alert_state))}</span></td>'
+            f"<td data-label=\"Último éxito\">{html.escape(last_success)}</td>"
+            f"<td data-label=\"Inventario\">{count}</td>"
+            f"<td data-label=\"Fallos\">{record.consecutive_failures}</td>"
+            f"<td data-label=\"Detalle\" class=\"detail\">{html.escape(detail)}</td>"
+            "</tr>"
+        )
+    table = (
+        "<div class=\"status-table-wrap\"><table><thead><tr>"
+        "<th>Fuente</th><th>Estado</th><th>Último éxito</th>"
+        "<th>Inventario</th><th>Fallos</th><th>Detalle</th>"
+        "</tr></thead><tbody>"
+        + "".join(rows)
+        + "</tbody></table></div>"
+        if rows
+        else "<p class=\"empty-status\">Todavía no hay comprobaciones registradas.</p>"
+    )
+    body = (
+        "<header><a class=\"brand\" href=\"/\">Se admiten humanos</a>"
+        "<span class=\"badge\">Monitorización</span></header>"
+        "<main class=\"status-main\"><p class=\"eyebrow\">Solo operaciones</p>"
+        "<h1>Estado de las fuentes</h1>"
+        "<p class=\"lede\">Últimos resultados técnicos. Esta página no muestra personas ni criterios de búsqueda.</p>"
+        f"{table}</main>"
+    )
+    return _layout("Estado de fuentes · Se admiten humanos", body)
+
+
 def _layout(title: str, body: str) -> str:
     return f"""<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{html.escape(title)}</title><meta name="description" content="Alertas gratuitas y open source para encontrar alquiler antes y con menos ruido."><style>{_CSS}</style></head><body>{body}<footer><p>Hecho para ayudar, no para ganar dinero. <a href="https://github.com/Algarciap/se-admiten-humanos">Código libre y abierto</a>.</p><p>Tus preferencias mandan; no inventamos información que el anuncio no da.</p></footer></body></html>"""
 
@@ -525,4 +628,6 @@ _CSS = """
 .panel{padding:clamp(22px,4vw,46px)}.panel-head{display:block;padding-bottom:22px}.panel-head>.step{color:var(--green);max-width:none;margin:0}.panel-head h2{font-size:clamp(2.2rem,5vw,3.7rem);margin:.18em 0}.panel-head>p:last-child{max-width:680px;margin:10px 0 0}fieldset{padding:0 0 22px}legend{float:left;width:100%;padding:0;margin:0 0 10px}.optional{margin-left:6px;color:var(--muted);font-size:.72rem;font-weight:500}.section-intro{clear:both;margin:0 0 12px;color:var(--muted);font-size:.86rem}legend+.grid{clear:both}.grid{gap:13px 18px}.grid>label{align-self:end}label{gap:5px}input,select,textarea{padding:10px 12px}textarea{min-height:78px}.option-groups{display:grid;grid-template-columns:1.25fr .8fr 1.25fr;gap:12px;margin-top:12px;align-items:start}.option-group{background:#fff;border:1px solid var(--line);border-radius:4px;padding:13px 14px}.option-group h3{font-family:inherit;font-size:.72rem;line-height:1.2;margin:0 0 10px;color:var(--green);text-transform:uppercase;letter-spacing:.1em}.option-list{display:grid;gap:9px}.option-list label{display:grid;grid-template-columns:17px minmax(0,1fr);gap:8px;align-items:start;font-weight:600;line-height:1.3}.option-list input{width:15px;height:15px;margin:2px 0 0;padding:0}.option-note{display:block;margin-top:11px;color:var(--muted);font-size:.8rem}.primary,.button{padding:13px 18px}@media(max-width:800px){.option-groups{grid-template-columns:1fr 1fr}.option-group:last-child{grid-column:1/-1}}@media(max-width:720px){.option-groups{grid-template-columns:1fr}.option-group:last-child{grid-column:auto}}
 .cards{border-top:2px solid var(--ink);padding-top:20px}.cards article{border-top:0;padding-top:0}
 html{-webkit-text-size-adjust:100%;text-size-adjust:100%}.date-field{overflow:hidden}.date-field input[type=date]{display:block;inline-size:100%;min-inline-size:0;max-inline-size:100%;width:100%;min-width:0;max-width:100%}@media(max-width:720px){header{display:grid;grid-template-columns:minmax(0,1fr) auto}.brand{overflow:hidden;text-overflow:ellipsis}.center{min-height:auto;display:block;padding-top:18px}.success{max-width:none;padding:28px 20px}.success .eyebrow{font-size:.72rem}.success h1{font-size:2.35rem}.success p{font-size:1rem;line-height:1.45}.date-field input[type=date]{-webkit-appearance:none;appearance:none;text-align:left}}
+.status-main{padding-top:42px}.status-main h1{font-size:clamp(2.7rem,6vw,5rem)}.status-table-wrap{overflow-x:auto;margin-top:34px;border:1px solid var(--ink);background:var(--card);box-shadow:7px 7px 0 var(--ink)}table{width:100%;border-collapse:collapse;min-width:850px;text-align:left}th,td{padding:14px 16px;border-bottom:1px solid var(--line);vertical-align:top}thead th{background:var(--ink);color:white;font-size:.76rem;text-transform:uppercase;letter-spacing:.06em}tbody th{font-family:Georgia,serif;font-size:1.05rem}.detail{max-width:360px;color:var(--muted);font-size:.85rem;overflow-wrap:anywhere}.health{display:inline-block;padding:5px 9px;border-radius:999px;background:var(--lime);font-size:.75rem;font-weight:850;white-space:nowrap}.health.failing,.health.zero_results{background:#ffd5cb}.health.stale{background:#ffe8a3}.empty-status{margin-top:30px;padding:24px;border:1px solid var(--line);background:var(--card)}
+@media(max-width:720px){.status-main{padding-top:24px}.status-main h1{font-size:2.7rem}.status-table-wrap{overflow:visible}.status-table-wrap table{min-width:0}.status-table-wrap thead{display:none}.status-table-wrap table,.status-table-wrap tbody,.status-table-wrap tr,.status-table-wrap th,.status-table-wrap td{display:block}.status-table-wrap tr{padding:15px 16px;border-bottom:1px solid var(--line)}.status-table-wrap tr:last-child{border-bottom:0}.status-table-wrap th,.status-table-wrap td{border:0;padding:4px 0}.status-table-wrap tbody th{font-size:1.35rem;margin-bottom:5px}.status-table-wrap td{display:grid;grid-template-columns:105px minmax(0,1fr);gap:10px}.status-table-wrap td:before{content:attr(data-label);color:var(--muted);font-size:.72rem;font-weight:850;text-transform:uppercase;letter-spacing:.05em}.status-table-wrap .detail{max-width:none}}
 """

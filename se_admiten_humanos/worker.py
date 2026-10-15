@@ -15,6 +15,12 @@ from .acquisition import AcquisitionResult, AcquisitionRunner, Notifier
 from .alquiler_seguro import AlquilerSeguroSource
 from .idealista import IdealistaApiClient, IdealistaApiSource, IdealistaSearchConfig, MADRID_CENTER
 from .models import PropertyType
+from .monitoring import (
+    MonitoringNotifier,
+    MonitoringSettings,
+    SourceHealthMonitor,
+    monitoring_notifier_from_environment,
+)
 from .nestar import NestarSource
 from .persistence import RentalStore
 from .profile_config import ProfileBundle, load_profile_bundle_json
@@ -228,6 +234,11 @@ def _save_bundle(store: RentalStore, bundle: ProfileBundle) -> None:
         store.save_search_profile(search_profile)
 
 
+def _is_unexpected_zero_error(error: Exception) -> bool:
+    detail = str(error).casefold()
+    return "zero listing" in detail or "cero viviendas" in detail
+
+
 def _ensure_profiles(
     store: RentalStore,
     environment: Mapping[str, str],
@@ -308,6 +319,7 @@ def run_worker_sources_cycle(
     sources: tuple[WebsiteSource, ...] | None = None,
     notifier_factory: NotifierFactory = notifier_from_environment,
     idealista_client: IdealistaApiClient | None = None,
+    monitoring_notifier: MonitoringNotifier | None = None,
 ) -> WorkerBatchResult:
     """Run all enabled website sources, isolating one parser failure from the rest."""
 
@@ -323,6 +335,20 @@ def run_worker_sources_cycle(
         raise WorkerConfigurationError("Website source ids must be non-empty and unique")
     with RentalStore(settings.database_path) as store:
         profiles_imported = _ensure_profiles(store, environment)
+        try:
+            monitoring_settings = MonitoringSettings.from_environment(environment)
+            operator_notifier = (
+                monitoring_notifier
+                if monitoring_notifier is not None
+                else monitoring_notifier_from_environment(environment)
+            )
+        except ValueError as error:
+            raise WorkerConfigurationError(str(error)) from error
+        monitor = SourceHealthMonitor(
+            store,
+            monitoring_settings,
+            operator_notifier,
+        )
         if use_default_sources:
             idealista = _idealista_source(
                 environment,
@@ -364,6 +390,25 @@ def run_worker_sources_cycle(
                             discoveries_recorded=baseline.discoveries_recorded,
                         )
                     )
+                    if baseline.discoveries_recorded == 0:
+                        errors.append(
+                            f"{adapter.source_id}: unexpected zero listings during baseline"
+                        )
+                        errors.extend(
+                            monitor.failure(
+                                adapter.source_id,
+                                "Discovery returned zero total listings during baseline",
+                                unexpected_zero=True,
+                            )
+                        )
+                    else:
+                        errors.extend(
+                            monitor.success(
+                                adapter.source_id,
+                                "baseline_created",
+                                baseline.discoveries_recorded,
+                            )
+                        )
                     continue
                 if notifier is None:
                     try:
@@ -386,12 +431,45 @@ def run_worker_sources_cycle(
                         acquisition=acquisition,
                     )
                 )
+                discovery_count = store.website_source_discovery_count(
+                    adapter.source_id
+                )
+                if discovery_count == 0:
+                    errors.append(
+                        f"{adapter.source_id}: unexpected zero total listings"
+                    )
+                    errors.extend(
+                        monitor.failure(
+                            adapter.source_id,
+                            "Discovery returned zero total listings",
+                            unexpected_zero=True,
+                        )
+                    )
+                elif discovery_count is not None:
+                    errors.extend(
+                        monitor.success(
+                            adapter.source_id,
+                            acquisition.status,
+                            discovery_count,
+                        )
+                    )
             except WorkerConfigurationError:
                 raise
             except Exception as error:
-                errors.append(
-                    f"{adapter.source_id}: {type(error).__name__}: {error}"[:1000]
+                detail = f"{adapter.source_id}: {type(error).__name__}: {error}"[:1000]
+                errors.append(detail)
+                errors.extend(
+                    monitor.failure(
+                        adapter.source_id,
+                        detail,
+                        unexpected_zero=_is_unexpected_zero_error(error),
+                    )
                 )
+        errors.extend(
+            monitor.check_stale(
+                tuple(source.source_id.strip().casefold() for source in website_sources)
+            )
+        )
         if errors:
             status = "partial_failure"
         elif all(result.status == "baseline_created" for result in results):

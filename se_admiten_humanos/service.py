@@ -38,11 +38,15 @@ def web_settings_from_environment(
     secure_value = values.get("WEB_COOKIE_SECURE", "true").strip().casefold()
     if secure_value not in {"true", "false"}:
         raise ValueError("WEB_COOKIE_SECURE must be true or false")
+    status_page_token = values.get("STATUS_PAGE_TOKEN", "").strip()
+    if status_page_token and len(status_page_token) < 24:
+        raise ValueError("STATUS_PAGE_TOKEN must contain at least 24 characters")
     return (
         WebSettings(
             database_path=values.get("DATABASE_PATH", "rentals.sqlite3").strip(),
             bot_username=bot_username,
             secure_cookies=secure_value == "true",
+            status_page_token=status_page_token,
         ),
         port,
     )
