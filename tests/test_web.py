@@ -177,6 +177,10 @@ class WebTests(unittest.TestCase):
         self.assertNotIn("Presupuesto preferido al mes <span>€</span>", page)
         self.assertIn("fieldset{padding:0 0 22px}", page)
         self.assertIn(
+            "legend{float:left;width:100%;padding:0;margin:0 0 10px}", page
+        )
+        self.assertIn("legend+.grid{clear:both}", page)
+        self.assertIn(
             ".cards{border-top:2px solid var(--ink);padding-top:20px}", page
         )
         self.assertIn(".cards article{border-top:0;padding-top:0}", page)
