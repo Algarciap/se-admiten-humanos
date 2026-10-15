@@ -1,7 +1,6 @@
 """End-to-end WSGI tests for public onboarding."""
 
 import io
-import base64
 import tempfile
 import unittest
 from http.cookies import SimpleCookie
@@ -174,7 +173,7 @@ class WebTests(unittest.TestCase):
         self.assertEqual(status, "404 Not Found")
         self.assertNotIn("Estado de las fuentes", body)
 
-    def test_status_page_requires_basic_auth_and_exposes_no_user_data(self):
+    def test_status_page_uses_password_form_and_exposes_no_user_data(self):
         self.app = WebApplication(
             WebSettings(
                 database_path=str(self.database),
@@ -186,17 +185,35 @@ class WebTests(unittest.TestCase):
         with RentalStore(self.database) as store:
             store.record_source_success("redpiso", "succeeded", 286)
 
-        status, headers, _ = self.request(path="/status")
-        self.assertEqual(status, "401 Unauthorized")
-        self.assertIn(
-            ("WWW-Authenticate", 'Basic realm="Source status"'),
-            headers,
-        )
+        status, headers, body = self.request(path="/status")
+        self.assertEqual(status, "200 OK")
+        self.assertIn('action="/status/login"', body)
+        self.assertNotIn("Redpiso", body)
+        csrf = self.response_cookies(headers)["humanos_csrf"]
 
-        credentials = base64.b64encode(b"admin:monitor-secret-at-least-24").decode()
+        status, _, body = self.request(
+            "POST",
+            "/status/login",
+            {"csrf_token": csrf, "password": "incorrecta"},
+            f"humanos_csrf={csrf}",
+        )
+        self.assertEqual(status, "401 Unauthorized")
+        self.assertIn("no es correcta", body)
+
+        status, headers, _ = self.request(
+            "POST",
+            "/status/login",
+            {"csrf_token": csrf, "password": "monitor-secret-at-least-24"},
+            f"humanos_csrf={csrf}",
+        )
+        self.assertEqual(status, "303 See Other")
+        self.assertIn(("Location", "/status"), headers)
+        status_cookie = self.response_cookies(headers)["humanos_status"]
+        self.assertNotEqual(status_cookie, "monitor-secret-at-least-24")
+
         status, _, body = self.request(
             path="/status",
-            authorization=f"Basic {credentials}",
+            cookies=f"humanos_csrf={csrf}; humanos_status={status_cookie}",
         )
         self.assertEqual(status, "200 OK")
         self.assertIn("Estado de las fuentes", body)

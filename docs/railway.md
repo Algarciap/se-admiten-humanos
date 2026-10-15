@@ -93,11 +93,11 @@ The container now runs `se-admiten-humanos run-service`. Railway routes HTTPS tr
 Railway domain under the service's Networking settings and share that HTTPS URL only after testing a
 complete form submission and Telegram connection. Do not set `WEB_COOKIE_SECURE=false` in Railway.
 
-When `STATUS_PAGE_TOKEN` is configured, `/status` uses HTTP Basic authentication with username
-`admin` and that token as the password. The page contains source names, health, inventory totals,
-failure counts, and sanitized technical errors only. It deliberately excludes users, Telegram chat
-ids, and search criteria. Without the variable, the route returns `404` rather than exposing an
-unprotected dashboard.
+When `STATUS_PAGE_TOKEN` is configured, `/status` shows a normal password form and creates an
+eight-hour secure browser session after the correct token is entered. The page contains source names,
+health, inventory totals, failure counts, and sanitized technical errors only. It deliberately
+excludes users, Telegram chat ids, and search criteria. Without the variable, the route returns `404`
+rather than exposing an unprotected dashboard.
 
 The onboarding session is currently tied to one browser. Email verification, cross-device sign-in,
 account recovery, abuse controls, and administrative deletion tools are required before broad public

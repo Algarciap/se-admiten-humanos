@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import base64
-import binascii
 import hashlib
 import html
+import hmac
 import json
 import re
 import secrets
@@ -27,6 +26,8 @@ StartResponse = Callable[[str, list[tuple[str, str]]], object]
 _EMAIL = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 _SESSION_COOKIE = "humanos_session"
 _CSRF_COOKIE = "humanos_csrf"
+_STATUS_COOKIE = "humanos_status"
+_STATUS_SESSION_SECONDS = 8 * 60 * 60
 _MAX_BODY_BYTES = 65_536
 
 
@@ -70,23 +71,65 @@ class WebApplication:
             if path == "/status" and method == "GET":
                 if not self.settings.status_page_token:
                     return self._error(start_response, "404 Not Found", "Página no encontrada.")
-                if not _valid_status_authorization(
-                    str(environ.get("HTTP_AUTHORIZATION", "")),
-                    self.settings.status_page_token,
+                csrf = cookies.get(_CSRF_COOKIE) or secrets.token_urlsafe(24)
+                if not _valid_status_cookie(
+                    cookies.get(_STATUS_COOKIE, ""), self.settings.status_page_token
                 ):
                     return self._respond(
                         start_response,
-                        "401 Unauthorized",
-                        _message_page(
-                            "Estado protegido",
-                            "Introduce la contraseña de monitorización para continuar.",
+                        "200 OK",
+                        _status_login_page(csrf),
+                        cookies=(
+                            ()
+                            if cookies.get(_CSRF_COOKIE)
+                            else (self._csrf_cookie(csrf),)
                         ),
-                        extra_headers=(("WWW-Authenticate", 'Basic realm="Source status"'),),
                     )
                 return self._respond(
                     start_response,
                     "200 OK",
-                    _status_page(store.list_source_health()),
+                    _status_page(store.list_source_health(), csrf),
+                    cookies=(
+                        () if cookies.get(_CSRF_COOKIE) else (self._csrf_cookie(csrf),)
+                    ),
+                )
+            if path == "/status/login" and method == "POST":
+                if not self.settings.status_page_token:
+                    return self._error(start_response, "404 Not Found", "Página no encontrada.")
+                form, error = _read_form(environ)
+                if error or not _valid_csrf(form, cookies):
+                    return self._error(
+                        start_response,
+                        "403 Forbidden",
+                        "La sesión del formulario ha caducado. Recarga la página.",
+                    )
+                password = form.get("password", "")
+                if not secrets.compare_digest(password, self.settings.status_page_token):
+                    return self._respond(
+                        start_response,
+                        "401 Unauthorized",
+                        _status_login_page(
+                            cookies.get(_CSRF_COOKIE, ""),
+                            "La contraseña no es correcta.",
+                        ),
+                    )
+                return self._redirect(
+                    start_response,
+                    "/status",
+                    cookies=(self._status_cookie(self.settings.status_page_token),),
+                )
+            if path == "/status/logout" and method == "POST":
+                form, error = _read_form(environ)
+                if error or not _valid_csrf(form, cookies):
+                    return self._error(
+                        start_response,
+                        "403 Forbidden",
+                        "No se pudo cerrar la sesión.",
+                    )
+                return self._redirect(
+                    start_response,
+                    "/status",
+                    cookies=(self._expired_cookie(_STATUS_COOKIE),),
                 )
             if path == "/" and method == "GET":
                 csrf = cookies.get(_CSRF_COOKIE) or secrets.token_urlsafe(24)
@@ -326,6 +369,14 @@ class WebApplication:
     def _csrf_cookie(self, value: str) -> str:
         return _cookie(_CSRF_COOKIE, value, 86_400, self.settings.secure_cookies)
 
+    def _status_cookie(self, token: str) -> str:
+        return _cookie(
+            _STATUS_COOKIE,
+            _status_cookie_value(token),
+            _STATUS_SESSION_SECONDS,
+            self.settings.secure_cookies,
+        )
+
     def _expired_cookie(self, name: str) -> str:
         return _cookie(name, "", 0, self.settings.secure_cookies)
 
@@ -377,22 +428,34 @@ def _valid_csrf(form: Mapping[str, str], cookies: Mapping[str, str]) -> bool:
     return bool(submitted and expected and secrets.compare_digest(submitted, expected))
 
 
-def _valid_status_authorization(raw: str, expected_token: str) -> bool:
-    scheme, _, credentials = raw.strip().partition(" ")
-    if scheme.casefold() == "bearer":
-        return bool(credentials) and secrets.compare_digest(credentials, expected_token)
-    if scheme.casefold() != "basic" or not credentials:
+def _status_cookie_value(token: str) -> str:
+    issued_at = str(int(datetime.now(UTC).timestamp()))
+    signature = hmac.new(
+        token.encode("utf-8"),
+        f"status-session:{issued_at}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"{issued_at}.{signature}"
+
+
+def _valid_status_cookie(value: str, token: str) -> bool:
+    if not value or not token:
+        return False
+    issued_at, separator, signature = value.partition(".")
+    if not separator:
         return False
     try:
-        decoded = base64.b64decode(credentials, validate=True).decode("utf-8")
-    except (binascii.Error, UnicodeDecodeError):
+        age = int(datetime.now(UTC).timestamp()) - int(issued_at)
+    except ValueError:
         return False
-    username, separator, password = decoded.partition(":")
-    return (
-        bool(separator)
-        and secrets.compare_digest(username, "admin")
-        and secrets.compare_digest(password, expected_token)
-    )
+    if age < 0 or age > _STATUS_SESSION_SECONDS:
+        return False
+    expected = hmac.new(
+        token.encode("utf-8"),
+        f"status-session:{issued_at}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return secrets.compare_digest(signature, expected)
 
 
 def _required(form: Mapping[str, str], key: str, label: str, maximum: int) -> str:
@@ -561,7 +624,14 @@ def _message_page(title: str, message: str) -> str:
     return _layout(title, f"<main class=\"center\"><section class=\"success\"><h1>{html.escape(title)}</h1><p>{html.escape(message)}</p><a class=\"button secondary\" href=\"/\">Volver</a></section></main>")
 
 
-def _status_page(records) -> str:
+def _status_login_page(csrf: str, error: str = "") -> str:
+    error_box = f'<div class="error">{html.escape(error)}</div>' if error else ""
+    body = f"""<header><a class="brand" href="/">Se admiten humanos</a><span class="badge">Monitorización</span></header>
+    <main class="center status-login"><section class="success"><p class="eyebrow">Acceso privado</p><h1>Estado de las fuentes</h1><p>Introduce la contraseña de monitorización para continuar.</p>{error_box}<form method="post" action="/status/login"><input type="hidden" name="csrf_token" value="{html.escape(csrf, quote=True)}"><label for="status-password">Contraseña<input id="status-password" type="password" name="password" required autofocus autocomplete="current-password"></label><button class="primary" type="submit">Entrar →</button></form></section></main>"""
+    return _layout("Estado protegido · Se admiten humanos", body)
+
+
+def _status_page(records, csrf: str) -> str:
     rows = []
     labels = {
         "alquiler_seguro": "Alquiler Seguro",
@@ -610,7 +680,7 @@ def _status_page(records) -> str:
     )
     body = (
         "<header><a class=\"brand\" href=\"/\">Se admiten humanos</a>"
-        "<span class=\"badge\">Monitorización</span></header>"
+        f'<form class="status-logout" method="post" action="/status/logout"><input type="hidden" name="csrf_token" value="{html.escape(csrf, quote=True)}"><button type="submit">Cerrar monitorización</button></form></header>'
         "<main class=\"status-main\"><p class=\"eyebrow\">Solo operaciones</p>"
         "<h1>Estado de las fuentes</h1>"
         "<p class=\"lede\">Últimos resultados técnicos. Esta página no muestra personas ni criterios de búsqueda.</p>"
@@ -629,5 +699,6 @@ _CSS = """
 .cards{border-top:2px solid var(--ink);padding-top:20px}.cards article{border-top:0;padding-top:0}
 html{-webkit-text-size-adjust:100%;text-size-adjust:100%}.date-field{overflow:hidden}.date-field input[type=date]{display:block;inline-size:100%;min-inline-size:0;max-inline-size:100%;width:100%;min-width:0;max-width:100%}@media(max-width:720px){header{display:grid;grid-template-columns:minmax(0,1fr) auto}.brand{overflow:hidden;text-overflow:ellipsis}.center{min-height:auto;display:block;padding-top:18px}.success{max-width:none;padding:28px 20px}.success .eyebrow{font-size:.72rem}.success h1{font-size:2.35rem}.success p{font-size:1rem;line-height:1.45}.date-field input[type=date]{-webkit-appearance:none;appearance:none;text-align:left}}
 .status-main{padding-top:42px}.status-main h1{font-size:clamp(2.7rem,6vw,5rem)}.status-table-wrap{overflow-x:auto;margin-top:34px;border:1px solid var(--ink);background:var(--card);box-shadow:7px 7px 0 var(--ink)}table{width:100%;border-collapse:collapse;min-width:850px;text-align:left}th,td{padding:14px 16px;border-bottom:1px solid var(--line);vertical-align:top}thead th{background:var(--ink);color:white;font-size:.76rem;text-transform:uppercase;letter-spacing:.06em}tbody th{font-family:Georgia,serif;font-size:1.05rem}.detail{max-width:360px;color:var(--muted);font-size:.85rem;overflow-wrap:anywhere}.health{display:inline-block;padding:5px 9px;border-radius:999px;background:var(--lime);font-size:.75rem;font-weight:850;white-space:nowrap}.health.failing,.health.zero_results{background:#ffd5cb}.health.stale{background:#ffe8a3}.empty-status{margin-top:30px;padding:24px;border:1px solid var(--line);background:var(--card)}
+.status-login .success{width:min(100%,560px);text-align:left}.status-login .success h1{font-size:clamp(2.5rem,7vw,4.2rem)}.status-login form{margin-top:24px}.status-login .primary{width:100%;margin-top:18px}.status-logout button{border:0;background:transparent;color:var(--ink);font:inherit;font-size:.82rem;font-weight:750;text-decoration:underline;cursor:pointer}
 @media(max-width:720px){.status-main{padding-top:24px}.status-main h1{font-size:2.7rem}.status-table-wrap{overflow:visible}.status-table-wrap table{min-width:0}.status-table-wrap thead{display:none}.status-table-wrap table,.status-table-wrap tbody,.status-table-wrap tr,.status-table-wrap th,.status-table-wrap td{display:block}.status-table-wrap tr{padding:15px 16px;border-bottom:1px solid var(--line)}.status-table-wrap tr:last-child{border-bottom:0}.status-table-wrap th,.status-table-wrap td{border:0;padding:4px 0}.status-table-wrap tbody th{font-size:1.35rem;margin-bottom:5px}.status-table-wrap td{display:grid;grid-template-columns:105px minmax(0,1fr);gap:10px}.status-table-wrap td:before{content:attr(data-label);color:var(--muted);font-size:.72rem;font-weight:850;text-transform:uppercase;letter-spacing:.05em}.status-table-wrap .detail{max-width:none}}
 """
