@@ -30,6 +30,25 @@ class SearchProfileTests(unittest.TestCase):
         self.assertTrue(decision.eligible)
         self.assertEqual(decision.rejection_reasons, ())
 
+    def test_listing_below_minimum_bedrooms_is_rejected(self) -> None:
+        profile = SearchProfile(
+            id="three-bedroom-search",
+            user_id="user-1",
+            name="Madrid con 3 dormitorios",
+            max_rent_eur=1_500,
+            municipality="Madrid",
+            preferred_min_bedrooms=3,
+        )
+
+        decision = evaluate_listing(
+            Listing(price_eur=995, municipality="Madrid", bedrooms=1),
+            classify(""),
+            profile,
+        )
+
+        self.assertFalse(decision.eligible)
+        self.assertIn("below_preferred_bedrooms", decision.rejection_reasons)
+
     def test_garages_are_rejected_from_default_home_search(self) -> None:
         listing = Listing(
             price_eur=100,

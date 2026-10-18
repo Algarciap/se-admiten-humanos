@@ -166,7 +166,7 @@ def evaluate_listing(
         else:
             rejections.append("studio")
     elif listing.bedrooms < profile.preferred_min_bedrooms:
-        notes.append("below_preferred_bedrooms")
+        rejections.append("below_preferred_bedrooms")
 
     if profile.furnished is not None:
         if listing.is_furnished is None:
