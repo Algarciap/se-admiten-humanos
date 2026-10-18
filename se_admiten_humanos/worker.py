@@ -501,7 +501,12 @@ def run_worker(
         [WorkerSettings, Mapping[str, str]], WorkerCycleResult | WorkerBatchResult
     ] = run_worker_sources_cycle,
 ) -> int:
-    """Poll forever, failing after repeated errors so the platform restarts us."""
+    """Poll forever, restarting only after repeated worker-wide errors.
+
+    A multi-source cycle may report a partial failure when one source is
+    unavailable.  Those failures are already tracked by ``SourceHealthMonitor``
+    and must not stop the healthy sources or the co-hosted web application.
+    """
 
     values = dict(os.environ if environment is None else environment)
     idealista_client: IdealistaApiClient | None = None
@@ -531,7 +536,6 @@ def run_worker(
                     file=sys.stderr,
                     flush=True,
                 )
-                raise RuntimeError("; ".join(result.source_errors))
         except WorkerConfigurationError:
             raise
         except Exception as error:
@@ -552,7 +556,11 @@ def run_worker(
                 return 1
         else:
             consecutive_failures = 0
-            print(json.dumps(result.to_dict(), ensure_ascii=False), flush=True)
+            if not (
+                isinstance(result, WorkerBatchResult)
+                and result.status == "partial_failure"
+            ):
+                print(json.dumps(result.to_dict(), ensure_ascii=False), flush=True)
         cycles += 1
         if max_cycles is None or cycles < max_cycles:
             elapsed = time.monotonic() - started

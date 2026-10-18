@@ -10,6 +10,7 @@ from se_admiten_humanos.persistence import RentalStore
 from se_admiten_humanos.telegram import DeliveryAttempt
 from se_admiten_humanos.telegram_linking import TelegramLinkPollResult
 from se_admiten_humanos.worker import (
+    WorkerBatchResult,
     WorkerConfigurationError,
     WorkerCycleResult,
     WorkerSettings,
@@ -296,6 +297,35 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(exit_code, 1)
         self.assertEqual(calls, 3)
         self.assertEqual(len(sleeps), 2)
+
+    def test_partial_source_failures_do_not_stop_worker(self):
+        calls = 0
+        sleeps = []
+        settings = WorkerSettings(
+            database_path=str(self.database),
+            max_consecutive_failures=3,
+        )
+
+        def partial_cycle(_settings, _environment):
+            nonlocal calls
+            calls += 1
+            return WorkerBatchResult(
+                status="partial_failure",
+                sources=(),
+                source_errors=("tecnocasa: temporary outage",),
+            )
+
+        exit_code = run_worker(
+            settings,
+            {},
+            max_cycles=5,
+            sleep=sleeps.append,
+            cycle=partial_cycle,
+        )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(calls, 5)
+        self.assertEqual(len(sleeps), 4)
 
     def test_multi_source_cycle_baselines_every_source_without_notifying(self):
         second = MutableSource(
