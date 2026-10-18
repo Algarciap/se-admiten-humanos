@@ -8,12 +8,21 @@ import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
+from urllib.parse import urljoin, urlsplit
 
 from .persistence import RentalStore
 
 
 _BOT_USERNAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]{4,31}$")
-_START_COMMAND = re.compile(r"^/start(?:@[A-Za-z][A-Za-z0-9_]{4,31})? ([A-Za-z0-9_-]{20,64})$")
+_START_COMMAND = re.compile(
+    r"^/start(?:@[A-Za-z][A-Za-z0-9_]{4,31})?(?: ([A-Za-z0-9_-]{20,64}))?$"
+)
+
+# Kept together so the copy pass can revise bot voice without touching command routing.
+_WELCOME = "Configura tu búsqueda en Se admiten humanos y conecta Telegram para recibir avisos."
+_INVALID_LINK = "Este enlace ya no es válido. Entra en tu cuenta para generar uno nuevo."
+_HELP = "Este bot envía avisos de Se admiten humanos. Gestiona tu búsqueda desde tu cuenta."
+_CONNECTED = "✅ Telegram conectado. Recibirás aquí solo los pisos que encajen con tu búsqueda."
 
 
 class TelegramLinkClient(Protocol):
@@ -21,7 +30,13 @@ class TelegramLinkClient(Protocol):
 
     def get_updates(self, offset: int, *, limit: int = 100) -> tuple[dict[str, object], ...]: ...
 
-    def send_message(self, chat_id: str, text: str, listing_url: str = "") -> int: ...
+    def send_message(
+        self,
+        chat_id: str,
+        text: str,
+        action_url: str = "",
+        action_text: str = "Abrir anuncio",
+    ) -> int: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +94,7 @@ def create_telegram_link(
 def process_telegram_link_updates(
     store: RentalStore,
     client: TelegramLinkClient,
+    public_base_url: str = "",
 ) -> TelegramLinkPollResult:
     """Consume private-chat `/start` links and durably advance the update cursor."""
 
@@ -108,25 +124,49 @@ def process_telegram_link_updates(
             ignored += 1
             store.save_telegram_next_update_id(update_id + 1)
             continue
-        match = _START_COMMAND.fullmatch(text.strip())
-        if match is None:
-            ignored += 1
-            store.save_telegram_next_update_id(update_id + 1)
-            continue
         chat_id = str(chat["id"])
+        normalized_text = text.strip()
+        match = _START_COMMAND.fullmatch(normalized_text)
         try:
-            store.consume_telegram_link_token(_token_hash(match.group(1)), chat_id)
-        except ValueError:
-            rejected += 1
-        else:
-            linked += 1
-            try:
+            if match is not None and match.group(1):
+                try:
+                    store.consume_telegram_link_token(_token_hash(match.group(1)), chat_id)
+                except ValueError:
+                    rejected += 1
+                    client.send_message(
+                        chat_id,
+                        _INVALID_LINK,
+                        _account_url(public_base_url, "/account"),
+                        "Ir a mi cuenta",
+                    )
+                else:
+                    linked += 1
+                    client.send_message(chat_id, _CONNECTED)
+            elif match is not None:
                 client.send_message(
                     chat_id,
-                    "✅ Telegram conectado. Recibirás aquí solo los pisos que encajen con tu búsqueda.",
+                    _WELCOME,
+                    _account_url(public_base_url, "/account/register"),
+                    "Crear mi cuenta",
                 )
-            except Exception:
-                confirmation_failures += 1
+            elif normalized_text.startswith("/start"):
+                rejected += 1
+                client.send_message(
+                    chat_id,
+                    _INVALID_LINK,
+                    _account_url(public_base_url, "/account"),
+                    "Ir a mi cuenta",
+                )
+            else:
+                ignored += 1
+                client.send_message(
+                    chat_id,
+                    _HELP,
+                    _account_url(public_base_url, "/account"),
+                    "Ir a mi cuenta",
+                )
+        except Exception:
+            confirmation_failures += 1
         finally:
             store.save_telegram_next_update_id(update_id + 1)
     return TelegramLinkPollResult(
@@ -141,3 +181,21 @@ def process_telegram_link_updates(
 def _update_sort_key(update: dict[str, object]) -> int:
     update_id = update.get("update_id")
     return update_id if isinstance(update_id, int) else -1
+
+
+def _account_url(public_base_url: str, path: str) -> str:
+    """Return an HTTPS account URL, or no action when the public origin is unavailable."""
+
+    origin = public_base_url.strip()
+    parsed = urlsplit(origin)
+    if (
+        parsed.scheme != "https"
+        or not parsed.netloc
+        or parsed.username
+        or parsed.password
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+    ):
+        return ""
+    return urljoin(origin.rstrip("/") + "/", path.lstrip("/"))

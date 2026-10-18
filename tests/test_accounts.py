@@ -77,6 +77,27 @@ class AccountTests(unittest.TestCase):
         with RentalStore(self.database) as store:
             return store.web_session_user_id(digest(self.cookies["humanos_session"]))
 
+    def test_login_explains_project_before_account_actions(self):
+        status, _, body = self.request("GET", "/account/login")
+
+        self.assertEqual(status, "200 OK")
+        intro = body.index('class="account-project-intro"')
+        form = body.index('<form method="post" action="/account/login"')
+        create_account = body.index('href="/account/register"')
+        self.assertLess(intro, form)
+        self.assertLess(form, create_account)
+        self.assertIn("revisa anuncios nuevos, elimina duplicados y aplica tus criterios", body)
+        self.assertIn("no hay suscripciones, comisiones, anuncios pagados ni venta de datos personales", body)
+
+    def test_signed_in_account_uses_wide_landing_page_rhythm(self):
+        self.register()
+        status, _, body = self.request("GET", "/account")
+
+        self.assertEqual(status, "200 OK")
+        self.assertIn('account-page account-dashboard', body)
+        self.assertIn(".account-dashboard .success{width:100%;max-width:none;text-align:left", body)
+        self.assertIn(".account-dashboard .success>form{margin:24px 0 0}", body)
+
     def test_verification_required_get_does_not_consume_and_session_is_hashed(self):
         self.assertEqual(self.request("GET", "/")[0], "303 See Other")
         self.request("POST", "/account/register", {"email": " ANA@example.com "})

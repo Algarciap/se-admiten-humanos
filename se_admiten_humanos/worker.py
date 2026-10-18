@@ -219,7 +219,11 @@ def _poll_telegram_links(
             "TELEGRAM_BOT_TOKEN is required when TELEGRAM_BOT_USERNAME is configured"
         )
     try:
-        return process_telegram_link_updates(store, TelegramBotClient(token)), ""
+        return process_telegram_link_updates(
+            store,
+            TelegramBotClient(token),
+            environment.get("PUBLIC_BASE_URL", ""),
+        ), ""
     except ValueError as error:
         raise WorkerConfigurationError(str(error)) from error
     except Exception as error:

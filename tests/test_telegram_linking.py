@@ -24,8 +24,8 @@ class FakeTelegramClient:
         self.offsets.append((offset, limit))
         return self.updates
 
-    def send_message(self, chat_id, text, listing_url=""):
-        self.messages.append((chat_id, text, listing_url))
+    def send_message(self, chat_id, text, action_url="", action_text="Abrir anuncio"):
+        self.messages.append((chat_id, text, action_url, action_text))
         return len(self.messages)
 
 
@@ -118,6 +118,67 @@ class TelegramLinkingTests(unittest.TestCase):
         self.assertEqual(repeated.updates_seen, 0)
         self.assertEqual(client.offsets, [(0, 100), (43, 100)])
 
+    def test_plain_start_prompts_account_creation(self):
+        client = FakeTelegramClient(({
+            "update_id": 1,
+            "message": {"text": "/start", "chat": {"id": 123456, "type": "private"}},
+        },))
+
+        result = process_telegram_link_updates(
+            self.store, client, "https://humanos.example"
+        )
+
+        self.assertEqual(result.updates_seen, 1)
+        self.assertEqual(result.links_created, 0)
+        self.assertEqual(client.messages[0][2], "https://humanos.example/account/register")
+        self.assertEqual(client.messages[0][3], "Crear mi cuenta")
+
+    def test_rejected_link_explains_how_to_try_again(self):
+        client = FakeTelegramClient(({
+            "update_id": 1,
+            "message": {
+                "text": "/start " + "x" * 24,
+                "chat": {"id": 123456, "type": "private"},
+            },
+        },))
+
+        result = process_telegram_link_updates(
+            self.store, client, "https://humanos.example"
+        )
+
+        self.assertEqual(result.rejected_links, 1)
+        self.assertIn("no es válido", client.messages[0][1])
+        self.assertEqual(client.messages[0][2], "https://humanos.example/account")
+
+    def test_malformed_start_is_rejected_instead_of_silently_ignored(self):
+        client = FakeTelegramClient(({
+            "update_id": 1,
+            "message": {
+                "text": "/start not-a-valid-token",
+                "chat": {"id": 123456, "type": "private"},
+            },
+        },))
+
+        result = process_telegram_link_updates(
+            self.store, client, "https://humanos.example"
+        )
+
+        self.assertEqual(result.rejected_links, 1)
+        self.assertEqual(len(client.messages), 1)
+
+    def test_unknown_private_message_returns_account_help(self):
+        client = FakeTelegramClient(({
+            "update_id": 1,
+            "message": {"text": "hello", "chat": {"id": 123456, "type": "private"}},
+        },))
+
+        result = process_telegram_link_updates(
+            self.store, client, "https://humanos.example"
+        )
+
+        self.assertEqual(result.ignored_updates, 1)
+        self.assertEqual(client.messages[0][3], "Ir a mi cuenta")
+
     def test_group_and_unrelated_messages_are_ignored_but_checkpointed(self):
         link = create_telegram_link(self.store, "user-1", "SeAdmitenHumanosBot")
         client = FakeTelegramClient(
@@ -145,6 +206,7 @@ class TelegramLinkingTests(unittest.TestCase):
         self.assertEqual(result.links_created, 0)
         self.assertIsNone(self.store.telegram_chat_id("user-1"))
         self.assertEqual(self.store.telegram_next_update_id(), 3)
+        self.assertEqual(len(client.messages), 1)
 
 
 if __name__ == "__main__":

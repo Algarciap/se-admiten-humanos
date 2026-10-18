@@ -229,12 +229,14 @@ class WorkerTests(unittest.TestCase):
             self.environment,
             TELEGRAM_BOT_TOKEN="123456:test_token",
             TELEGRAM_BOT_USERNAME="SeAdmitenHumanosBot",
+            PUBLIC_BASE_URL="https://humanos.example",
         )
 
         result = run_worker_cycle(self.settings, environment, source=self.source)
 
         self.assertEqual(result.telegram_linking.links_created, 1)
         mocked_poll.assert_called_once()
+        self.assertEqual(mocked_poll.call_args.args[2], "https://humanos.example")
 
     @patch("se_admiten_humanos.worker.process_telegram_link_updates")
     def test_link_poll_failure_is_visible_without_blocking_property_scan(

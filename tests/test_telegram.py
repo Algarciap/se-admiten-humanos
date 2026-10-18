@@ -106,6 +106,20 @@ class TelegramTests(unittest.TestCase):
         self.assertEqual(payload["reply_markup"]["inline_keyboard"][0][0]["url"], self.listing.url)
 
     @patch("se_admiten_humanos.telegram.urlopen")
+    def test_client_accepts_reusable_action_button_copy(self, mocked_urlopen: Mock) -> None:
+        mocked_urlopen.return_value = _Response(
+            json.dumps({"ok": True, "result": {"message_id": 42}}).encode()
+        )
+
+        TelegramBotClient("123456:test_token").send_message(
+            "987654", "Welcome", "https://humanos.example/account", "Ir a mi cuenta"
+        )
+
+        payload = json.loads(mocked_urlopen.call_args.args[0].data)
+        button = payload["reply_markup"]["inline_keyboard"][0][0]
+        self.assertEqual(button, {"text": "Ir a mi cuenta", "url": "https://humanos.example/account"})
+
+    @patch("se_admiten_humanos.telegram.urlopen")
     def test_client_fetches_message_updates_from_requested_offset(
         self, mocked_urlopen: Mock
     ) -> None:

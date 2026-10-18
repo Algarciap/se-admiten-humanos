@@ -107,15 +107,21 @@ class TelegramBotClient:
         self._token = token.strip()
         self.timeout_seconds = timeout_seconds
 
-    def send_message(self, chat_id: str, text: str, listing_url: str = "") -> int:
+    def send_message(
+        self,
+        chat_id: str,
+        text: str,
+        action_url: str = "",
+        action_text: str = "Abrir anuncio",
+    ) -> int:
         normalized_chat_id = chat_id.strip()
         if not _CHAT_ID.fullmatch(normalized_chat_id):
             raise ValueError("Telegram chat id must be numeric")
         payload: dict[str, object] = {"chat_id": normalized_chat_id, "text": text}
-        safe_url = _listing_url(listing_url)
+        safe_url = _listing_url(action_url)
         if safe_url:
             payload["reply_markup"] = {
-                "inline_keyboard": [[{"text": "Abrir anuncio", "url": safe_url}]]
+                "inline_keyboard": [[{"text": action_text[:64], "url": safe_url}]]
             }
         result = self._request("sendMessage", payload)
         return int(result["message_id"])
