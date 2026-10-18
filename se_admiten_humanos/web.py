@@ -159,10 +159,36 @@ class WebApplication:
             if path == "/" and method == "GET":
                 csrf = cookies.get(_CSRF_COOKIE) or secrets.token_urlsafe(24)
                 state = self._load_state(store, user_id)
+                page = (
+                    _search_review_page(
+                        state,
+                        csrf=csrf,
+                        connected=bool(user_id and store.telegram_chat_id(user_id)),
+                        accounts_enabled=self.settings.accounts_enabled,
+                    )
+                    if state.user and state.renter and state.search
+                    else _profile_page(
+                        state, csrf, accounts_enabled=self.settings.accounts_enabled
+                    )
+                )
                 return self._respond(
                     start_response,
                     "200 OK",
-                    _profile_page(state, csrf, accounts_enabled=self.settings.accounts_enabled),
+                    page,
+                    cookies=(() if cookies.get(_CSRF_COOKIE) else (self._csrf_cookie(csrf),)),
+                )
+            if path == "/profile/edit" and method == "GET":
+                if user_id is None:
+                    return self._redirect(start_response, "/")
+                csrf = cookies.get(_CSRF_COOKIE) or secrets.token_urlsafe(24)
+                return self._respond(
+                    start_response,
+                    "200 OK",
+                    _profile_page(
+                        self._load_state(store, user_id),
+                        csrf,
+                        accounts_enabled=self.settings.accounts_enabled,
+                    ),
                     cookies=(() if cookies.get(_CSRF_COOKIE) else (self._csrf_cookie(csrf),)),
                 )
             if path == "/profile" and method == "POST":
@@ -684,6 +710,135 @@ def _profile_page(
     return _layout("Tu búsqueda · Se admiten humanos", body)
 
 
+def _search_review_page(
+    state: PageState, *, csrf: str, connected: bool, accounts_enabled: bool
+) -> str:
+    """Render a warm, readable summary of an existing search."""
+    assert state.user is not None
+    assert state.renter is not None
+    assert state.search is not None
+    user, renter, search = state.user, state.renter, state.search
+
+    home_types = []
+    if PropertyType.HOME in search.accepted_property_types:
+        home_types.append("una vivienda completa")
+    if PropertyType.ROOM in search.accepted_property_types:
+        home_types.append("una habitación")
+    property_text = " o ".join(home_types)
+    bedroom_text = (
+        "sin un mínimo de dormitorios"
+        if search.preferred_min_bedrooms == 0
+        else f"con al menos {search.preferred_min_bedrooms} "
+        f"{'dormitorio' if search.preferred_min_bedrooms == 1 else 'dormitorios'}"
+    )
+    budget_text = f"por un máximo de {search.max_rent_eur:,} € al mes".replace(",", ".")
+    ideal = f"{property_text.capitalize()}, {bedroom_text}, {budget_text}."
+
+    place = (
+        _natural_list(search.acceptable_districts)
+        if search.acceptable_districts
+        else f"cualquier zona de {search.municipality}"
+    )
+    duration_names = {
+        RentalDuration.LONG_TERM: "larga duración",
+        RentalDuration.TEMPORARY: "alquiler temporal",
+    }
+    duration = _natural_list(
+        tuple(duration_names[value] for value in search.accepted_rental_durations)
+    )
+    furnished = {
+        True: "amueblada",
+        False: "sin amueblar",
+        None: "con o sin muebles",
+    }[search.furnished]
+    location = f"En {place}, para {duration} y {furnished}."
+
+    pet_count = sum(pet.count for pet in renter.pets)
+    household = f"{renter.household_size} {'persona' if renter.household_size == 1 else 'personas'}"
+    if pet_count:
+        species_values = tuple(
+            _pluralize_species(pet.species, pet.count) for pet in renter.pets
+        )
+        species = _natural_list(species_values)
+        animals = f"{pet_count} {species}"
+        household += f" y {animals}"
+    people_title = f"Un hogar para {household}."
+
+    details: list[str] = []
+    if search.move_in_asap:
+        details.append(
+            "Necesitas mudarte cuanto antes"
+            if renter.household_size == 1
+            else "Necesitáis mudaros cuanto antes"
+        )
+    elif search.move_in_by:
+        details.append(
+            f"{'Te gustaría mudarte' if renter.household_size == 1 else 'Os gustaría mudaros'} "
+            f"antes del {_spanish_date(search.move_in_by)}"
+        )
+    if renter.pets:
+        pet_notes = " ".join(pet.notes.strip() for pet in renter.pets if pet.notes.strip())
+        if pet_notes:
+            details.append(pet_notes.rstrip(".") + ".")
+    detail_text = ". ".join(details).replace("..", ".")
+
+    status_title = "Todo listo" if connected else "Falta conectar Telegram"
+    status_copy = (
+        "Telegram está conectado. Te avisaremos en cuanto aparezca algo que encaje."
+        if connected
+        else "Conecta Telegram para que podamos avisarte en cuanto aparezca algo que encaje."
+    )
+    status_action = (
+        '<a class="review-status-link" href="/telegram-status">Comprobar conexión</a>'
+        if connected else ""
+    )
+    primary_action = (
+        '<a class="primary button" href="/telegram-status">Sí, esto es lo que busco</a>'
+        if connected
+        else f'<form method="post" action="/telegram-link"><input type="hidden" name="csrf_token" value="{html.escape(csrf, quote=True)}"><button class="primary button" type="submit">Sí, esto es lo que busco</button></form>'
+    )
+    account_link = (
+        '<a class="review-back" href="/account">Volver a mi cuenta</a>'
+        if accounts_enabled
+        else ""
+    )
+    body = f"""
+    <header><a class="brand" href="/">Se admiten humanos</a><span class="badge review-badge"><i></i>Búsqueda activa</span></header>
+    <main class="review-main">
+      <section class="review-intro"><p class="review-hello">Hola, {html.escape(user.display_name)}</p><h1>Así es la casa que buscas.</h1><p class="lede">Échale un vistazo para comprobar que seguimos buscando justo lo que necesitas.</p></section>
+      <section class="review-card" aria-label="Resumen de tu búsqueda">
+        <article class="review-row"><div class="review-icon" aria-hidden="true">⌂<span>♥</span></div><div><p class="review-label">Tu casa ideal</p><h2>{html.escape(ideal)}</h2><p>{html.escape(location)}</p></div></article>
+        <article class="review-row"><div class="review-icon review-family" aria-hidden="true">♙<span>●</span></div><div><p class="review-label">Para vosotros</p><h2>{html.escape(people_title)}</h2>{f'<p>{html.escape(detail_text)}</p>' if detail_text else ''}</div></article>
+        <aside class="review-status"><div class="review-plane" aria-hidden="true">➤</div><div><h2>{status_title}</h2><p>{status_copy} {status_action}</p></div></aside>
+      </section>
+      <nav class="review-actions" aria-label="Acciones de búsqueda">{primary_action}<a class="secondary button" href="/profile/edit">Quiero cambiar algo</a></nav>
+      {account_link}
+    </main>"""
+    return _layout("Tu búsqueda actual · Se admiten humanos", body)
+
+
+def _natural_list(values: tuple[str, ...]) -> str:
+    escaped = [value.strip() for value in values if value.strip()]
+    if len(escaped) < 2:
+        return escaped[0] if escaped else ""
+    return ", ".join(escaped[:-1]) + " o " + escaped[-1]
+
+
+def _pluralize_species(value: str, count: int) -> str:
+    species = value.strip()
+    if count != 1 and species and not species.casefold().endswith("s"):
+        return species + "s"
+    return species
+
+
+def _spanish_date(value: date) -> str:
+    months = (
+        "enero", "febrero", "marzo", "abril", "mayo", "junio",
+        "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+    )
+    return f"{value.day} de {months[value.month - 1]}"
+
+
 def _saved_page(state: PageState, telegram_url: str, error: str, connected: bool = False) -> str:
     assert state.search is not None
     action = f'<a class="primary button" href="{html.escape(telegram_url, quote=True)}">Conectar mi Telegram →</a>' if telegram_url else f'<div class="error">{html.escape(error)}</div><a class="secondary button" href="/">Volver a intentarlo</a>'
@@ -694,7 +849,7 @@ def _saved_page(state: PageState, telegram_url: str, error: str, connected: bool
     budget_text = f"Presupuesto preferido: <strong>{state.search.max_rent_eur} €</strong>"
     if state.search.urgent and state.search.stretch_max_rent_eur is not None:
         budget_text += f"; sugerencias urgentes hasta <strong>{state.search.stretch_max_rent_eur} €</strong>"
-    body = f"""<header><a class="brand" href="/">Se admiten humanos</a><span class="badge" aria-label="Búsqueda guardada">Guardada</span></header><main class="center"><section class="success"><div class="success-mark">✓</div><p class="eyebrow">Ya sabemos qué buscar</p><h1>Tu búsqueda está lista.</h1><p>{budget_text} al mes en Madrid. Los avisos de anuncios se reciben por Telegram.</p>{action}{'' if connected else '<small>El enlace de Telegram caduca en 10 minutos y solo funciona una vez.</small>'}<a href="/">← Revisar o cambiar mis datos</a></section></main>"""
+    body = f"""<header><a class="brand" href="/">Se admiten humanos</a><span class="badge" aria-label="Búsqueda guardada">Guardada</span></header><main class="center"><section class="success"><div class="success-mark">✓</div><p class="eyebrow">Ya sabemos qué buscar</p><h1>Tu búsqueda está lista.</h1><p>{budget_text} al mes en Madrid. Los avisos de anuncios se reciben por Telegram.</p>{action}{'' if connected else '<small>El enlace de Telegram caduca en 10 minutos y solo funciona una vez.</small>'}<a href="/">← Revisar mi búsqueda</a></section></main>"""
     return _layout("Búsqueda guardada · Se admiten humanos", body)
 
 
@@ -865,6 +1020,8 @@ html{-webkit-text-size-adjust:100%;text-size-adjust:100%}.date-field{overflow:hi
 .status-main{padding-top:42px}.status-main h1{font-size:clamp(2.7rem,6vw,5rem)}.status-table-wrap{overflow-x:auto;margin-top:34px;border:1px solid var(--ink);background:var(--card);box-shadow:7px 7px 0 var(--ink)}table{width:100%;border-collapse:collapse;min-width:850px;text-align:left}th,td{padding:14px 16px;border-bottom:1px solid var(--line);vertical-align:top}thead th{background:var(--ink);color:white;font-size:.76rem;text-transform:uppercase;letter-spacing:.06em}tbody th{font-family:Georgia,serif;font-size:1.05rem}.detail{max-width:360px;color:var(--muted);font-size:.85rem;overflow-wrap:anywhere}.health{display:inline-block;padding:5px 9px;border-radius:999px;background:var(--lime);font-size:.75rem;font-weight:850;white-space:nowrap}.health.failing,.health.zero_results{background:#ffd5cb}.health.stale{background:#ffe8a3}.empty-status{margin-top:30px;padding:24px;border:1px solid var(--line);background:var(--card)}
 .status-login .success{width:min(100%,560px);text-align:left}.status-login .success h1{font-size:clamp(2.5rem,7vw,4.2rem)}.status-login form{margin-top:24px}.status-login .primary{width:100%;margin-top:18px}.status-logout button{border:0;background:transparent;color:var(--ink);font:inherit;font-size:.82rem;font-weight:750;text-decoration:underline;cursor:pointer}
 .account-header-link{color:var(--green);font-size:.86rem;font-weight:850;text-decoration:none;border:1px solid var(--green);border-radius:999px;padding:7px 12px}.account-header-link:hover{background:var(--lime)}.account-page .success>p:not(.eyebrow){color:var(--muted)}.account-page .success a{color:var(--green);font-weight:750;text-decoration-thickness:1px;text-underline-offset:3px}.account-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:24px}.account-actions.account-recovery-actions{grid-template-columns:minmax(0,1fr)}.account-actions .account-action{display:flex;align-items:center;justify-content:center;min-height:48px;border:1px solid var(--green);border-radius:4px;padding:11px 14px;text-align:center;text-decoration:none}.account-actions .account-action:hover{background:#edf5da}.account-actions .account-action-main{background:var(--lime);color:var(--ink);border-color:var(--ink);box-shadow:3px 3px 0 var(--ink)}
+.account-project-intro{margin:28px 0 30px;padding:24px;border:1px solid var(--line);border-left:5px solid var(--coral);background:var(--paper)}.account-project-intro .account-project-kicker{margin:0 0 7px;color:var(--green);font-size:.72rem;font-weight:900;letter-spacing:.11em;text-transform:uppercase}.account-project-intro h2{font-size:clamp(1.65rem,4vw,2.25rem);margin:0 0 14px}.account-project-intro>p:not(.account-project-kicker){margin:0 0 15px;color:var(--muted);font-size:1rem}.account-project-intro ul{margin:0 0 17px;padding-left:20px;color:var(--muted)}.account-project-intro li+li{margin-top:9px}.account-project-intro strong{color:var(--ink)}.account-signin-note{margin:0 0 20px}.account-page .account-signin-note+form{margin-top:0}
+.account-welcome .success{width:min(100%,1040px);max-width:1040px;display:grid;grid-template-columns:minmax(0,1.15fr) minmax(300px,.85fr);column-gap:clamp(32px,6vw,70px);text-align:left}.account-welcome .success>.eyebrow,.account-welcome .success>h1{grid-column:1/-1}.account-welcome .account-project-intro{grid-column:1;grid-row:3/6;margin-bottom:0}.account-welcome .account-signin-note{grid-column:2;grid-row:3;align-self:end}.account-welcome .account-signin-note+form{grid-column:2;grid-row:4}.account-welcome .account-actions{grid-column:2;grid-row:5;align-self:start}.account-welcome .success h1{font-size:clamp(3rem,6vw,5rem)}@media(max-width:760px){.account-welcome .success{display:block}.account-welcome .account-project-intro{margin-bottom:28px}.account-welcome .success h1{font-size:2.35rem}}
 @media(max-width:520px){.account-actions{grid-template-columns:1fr}.account-header-link{font-size:.75rem;padding:6px 9px}}
 @media(max-width:720px){.status-main{padding-top:24px}.status-main h1{font-size:2.7rem}.status-table-wrap{overflow:visible}.status-table-wrap table{min-width:0}.status-table-wrap thead{display:none}.status-table-wrap table,.status-table-wrap tbody,.status-table-wrap tr,.status-table-wrap th,.status-table-wrap td{display:block}.status-table-wrap tr{padding:15px 16px;border-bottom:1px solid var(--line)}.status-table-wrap tr:last-child{border-bottom:0}.status-table-wrap th,.status-table-wrap td{border:0;padding:4px 0}.status-table-wrap tbody th{font-size:1.35rem;margin-bottom:5px}.status-table-wrap td{display:grid;grid-template-columns:105px minmax(0,1fr);gap:10px}.status-table-wrap td:before{content:attr(data-label);color:var(--muted);font-size:.72rem;font-weight:850;text-transform:uppercase;letter-spacing:.05em}.status-table-wrap .detail{max-width:none}}
 .promise span{border:0;border-left:3px solid var(--coral);border-radius:0;padding:2px 10px;color:var(--muted);font-size:.8rem}.required-note{text-align:right;color:var(--muted);font-size:.78rem;margin:18px 0 0}.required{color:var(--coral);font-weight:900}.field-group{display:flex;flex-direction:column;gap:5px;font-size:.9rem;font-weight:750}.field-label{display:flex;flex-direction:column;gap:3px}.field-label small{color:var(--muted);font-weight:400}.form-progress{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;list-style:none;margin:20px 0 0;padding:0}.form-progress button{width:100%;border:0;border-top:2px solid var(--line);background:transparent;color:var(--muted);padding:10px 4px;text-align:left;font:inherit;font-size:.78rem;font-weight:800;cursor:pointer}.form-progress button span{display:inline-grid;place-items:center;width:23px;height:23px;margin-right:5px;border-radius:50%;background:var(--line);color:var(--ink)}.form-progress button[aria-current=step]{border-color:var(--green);color:var(--green)}.form-progress button[aria-current=step] span{background:var(--lime)}.wizard-ready .wizard-step[hidden]{display:none}.wizard-step{padding:0 0 36px;margin-top:12px}.wizard-step legend{margin-bottom:12px}.wizard-nav{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:28px}.wizard-nav-end{justify-content:flex-end}.wizard-nav .primary{width:auto;margin:0}.secondary-step{border:1px solid var(--ink);border-radius:4px;background:transparent;color:var(--ink);padding:12px 18px;font:inherit;font-weight:850;cursor:pointer}.district-picker{position:relative;border:1px solid #99a298;border-radius:4px;background:#fff}.district-picker summary{min-height:45px;padding:10px 40px 10px 12px;cursor:pointer;font-weight:500;list-style:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.district-picker summary::-webkit-details-marker{display:none}.district-picker summary:after{content:'⌄';position:absolute;right:14px;top:9px;color:var(--green);font-size:1.2rem}.district-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;border-top:1px solid var(--line);background:var(--line);max-height:250px;overflow:auto}.district-options label{display:grid;grid-template-columns:18px minmax(0,1fr);align-items:start;gap:8px;background:#fff;padding:10px;font-size:.82rem;font-weight:600}.district-options input{width:16px;height:16px;margin:1px 0 0;padding:0}.account-note{align-self:end;margin:0 0 9px}
@@ -873,4 +1030,6 @@ html{-webkit-text-size-adjust:100%;text-size-adjust:100%}.date-field{overflow:hi
 input[type=number]{appearance:textfield;-moz-appearance:textfield}input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
 .count-control{display:flex;align-items:stretch;gap:8px;min-width:0}.count-control input{flex:1;min-width:0;text-align:center}.count-control button{flex:0 0 46px;min-height:46px;border:1px solid var(--green);border-radius:4px;background:var(--paper);color:var(--green);font:inherit;font-size:1.4rem;cursor:pointer}.count-control button[hidden]{display:none}.count-control button:disabled{opacity:.4;cursor:default}.count-control button:focus-visible{outline:3px solid var(--lime)}
 select{appearance:none;-webkit-appearance:none;min-height:46px;padding-right:42px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath d='m4 6 4 4 4-4' fill='none' stroke='%231f5c45' stroke-width='2'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 14px center;background-size:16px}.district-picker summary{position:relative;min-height:46px}.district-picker summary:after{content:'';width:8px;height:8px;border-right:2px solid var(--green);border-bottom:2px solid var(--green);right:17px;top:50%;transform:translateY(-70%) rotate(45deg)}.district-picker[open] summary:after{transform:translateY(-30%) rotate(225deg)}
+.review-badge{display:flex;align-items:center;gap:9px;text-transform:none;letter-spacing:0;font-size:.82rem}.review-badge i{width:9px;height:9px;border-radius:50%;background:var(--green)}.review-main{padding-top:35px}.review-intro{max-width:1080px;margin:0 auto 34px}.review-hello{position:relative;display:inline-block;margin:0;color:var(--coral);font-size:1.12rem;font-weight:900}.review-hello:after{content:' ';position:absolute;right:-27px;top:-7px;width:17px;height:18px;border-top:3px solid var(--coral);border-right:3px solid var(--coral);transform:rotate(-12deg)}.review-intro h1{font-size:clamp(3.1rem,6.3vw,5.6rem);margin:.12em 0}.review-intro .lede{max-width:950px;margin:.25em 0}.review-card{max-width:1080px;margin:auto;background:var(--card);border:1px solid var(--ink);box-shadow:9px 9px 0 var(--ink);padding:28px 34px 18px}.review-row{display:grid;grid-template-columns:125px minmax(0,1fr);align-items:center;gap:22px;padding:28px 0}.review-row+.review-row{border-top:1px solid var(--line)}.review-icon{position:relative;width:82px;height:70px;display:grid;place-items:center;color:var(--green);font-family:Georgia,serif;font-size:4.8rem;line-height:1}.review-icon span{position:absolute;right:4px;bottom:9px;color:var(--coral);font-family:inherit;font-size:1.05rem}.review-family{font-size:4rem}.review-family span{right:5px;bottom:14px}.review-label{margin:0 0 7px;color:var(--green);font-size:.76rem;font-weight:900;letter-spacing:.11em;text-transform:uppercase}.review-row h2,.review-status h2{font-size:clamp(1.55rem,3vw,2.15rem);margin:0}.review-row p:last-child{margin:8px 0 0;color:var(--muted);font-size:1.06rem}.review-status{display:grid;grid-template-columns:105px minmax(0,1fr);align-items:center;gap:18px;margin-top:5px;padding:22px 26px;background:var(--lime)}.review-status p{margin:5px 0 0;font-size:1.02rem}.review-status-link{white-space:nowrap;font-weight:800}.review-plane{color:var(--green);font-size:3.1rem;transform:rotate(-32deg);text-align:center}.review-actions{max-width:780px;margin:34px auto 0;display:grid;grid-template-columns:1fr 1fr;gap:22px}.review-actions form{margin:0}.review-actions form .button{width:100%;height:100%}.review-actions .button{display:flex;align-items:center;justify-content:center;margin:0;text-align:center}.review-actions .secondary:hover{background:var(--card)}.review-back{display:block;width:max-content;margin:17px auto 0;color:var(--ink)}
+@media(max-width:720px){.review-main{padding:18px 16px 70px}.review-intro{margin-bottom:25px}.review-intro h1{font-size:3rem}.review-card{padding:13px 18px 18px;box-shadow:5px 5px 0 var(--ink)}.review-row{grid-template-columns:1fr;gap:8px;padding:24px 0}.review-icon{width:54px;height:45px;font-size:3.3rem;justify-self:start}.review-family{font-size:2.9rem}.review-status{grid-template-columns:52px minmax(0,1fr);padding:18px 16px}.review-plane{font-size:2.2rem}.review-actions{grid-template-columns:1fr;gap:11px}.review-actions .button{min-height:52px}.review-badge{font-size:.7rem}}
 """

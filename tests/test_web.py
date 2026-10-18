@@ -116,12 +116,31 @@ class WebTests(unittest.TestCase):
             ).fetchone()[0]
             self.assertEqual(token_count, 1)
 
-        status, _, edit_page = self.request(
+        status, _, review_page = self.request(
             cookies=f"humanos_csrf={csrf}; humanos_session={session}"
+        )
+        self.assertEqual(status, "200 OK")
+        self.assertIn("Hola, Ana", review_page)
+        self.assertIn("Así es la casa que buscas", review_page)
+        self.assertIn("Una vivienda completa, con al menos 1 dormitorio", review_page)
+        self.assertIn("Centro o Chamberí", review_page)
+        self.assertIn("Un hogar para 2 personas y 2 gatos", review_page)
+        self.assertIn('action="/telegram-link"', review_page)
+        self.assertIn('href="/profile/edit"', review_page)
+
+        status, _, edit_page = self.request(
+            path="/profile/edit",
+            cookies=f"humanos_csrf={csrf}; humanos_session={session}",
         )
         self.assertEqual(status, "200 OK")
         self.assertIn("Actualiza tus datos", edit_page)
         self.assertIn('value="1100"', edit_page)
+
+    def test_profile_edit_redirects_without_a_saved_session(self):
+        status, headers, _ = self.request(path="/profile/edit")
+
+        self.assertEqual(status, "303 See Other")
+        self.assertIn(("Location", "/"), headers)
 
     def test_profile_post_requires_matching_csrf_cookie(self):
         status, _, page = self.request(
