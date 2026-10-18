@@ -30,8 +30,8 @@ def handle_accounts(app, store, environ, start_response, user_id, cookies):
 
     csrf = cookies.get(_CSRF_COOKIE) or secrets.token_urlsafe(24)
 
-    def page(title, content, status="200 OK"):
-        return app._respond(start_response, status, _layout(title, f'<header><a class="brand" href="/">Se admiten humanos</a><a class="account-header-link" href="/account">Mi cuenta</a></header><main class="center status-login account-page"><section class="success"><p class="eyebrow">Tu espacio</p><h1>{title}</h1>{content}</section></main>'),
+    def page(title, content, status="200 OK", page_class=""):
+        return app._respond(start_response, status, _layout(title, f'<header><a class="brand" href="/">Se admiten humanos</a><a class="account-header-link" href="/account">Mi cuenta</a></header><main class="center status-login account-page{page_class}"><section class="success"><p class="eyebrow">Tu espacio</p><h1>{title}</h1>{content}</section></main>'),
                             cookies=(() if cookies.get(_CSRF_COOKIE) else (app._csrf_cookie(csrf),)))
 
     def signed_in(new_user_id):
@@ -87,7 +87,7 @@ def handle_accounts(app, store, environ, start_response, user_id, cookies):
         content += _form("/account/delete", csrf, password_field + '<label>Escribe ELIMINAR<input required name="confirmation" autocomplete="off"></label>', "Eliminar mi cuenta y mis datos")
         content += '<p><a href="/">Editar búsqueda</a> · <a href="/account/recover">Cambiar contraseña por correo</a></p>'
         content += _form("/logout", csrf, "", "Cerrar sesión")
-        return page("Mi cuenta", content)
+        return page("Mi cuenta", content, page_class=" account-dashboard")
 
     if method != "POST":
         return app._error(start_response, "405 Method Not Allowed", "Método no permitido.")
