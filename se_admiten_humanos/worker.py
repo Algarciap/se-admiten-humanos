@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
@@ -228,6 +229,52 @@ def _poll_telegram_links(
         raise WorkerConfigurationError(str(error)) from error
     except Exception as error:
         return None, f"{type(error).__name__}: {error}"[:500]
+
+
+def run_telegram_link_worker(
+    settings: WorkerSettings,
+    environment: Mapping[str, str] | None = None,
+    *,
+    poll_interval_seconds: float = 2.0,
+    stop_event: threading.Event | None = None,
+    max_polls: int | None = None,
+) -> int:
+    """Poll Telegram links independently from the slower property-source loop."""
+
+    if poll_interval_seconds <= 0:
+        raise WorkerConfigurationError(
+            "Telegram link poll interval must be greater than zero"
+        )
+    values = dict(os.environ if environment is None else environment)
+    event = stop_event or threading.Event()
+    polls = 0
+    with RentalStore(settings.database_path) as store:
+        while not event.is_set() and (max_polls is None or polls < max_polls):
+            result, error = _poll_telegram_links(store, values)
+            if error:
+                print(
+                    json.dumps(
+                        {"status": "telegram_link_poll_failed", "error": error},
+                        ensure_ascii=False,
+                    ),
+                    file=sys.stderr,
+                    flush=True,
+                )
+            elif result is not None and result.updates_seen:
+                print(
+                    json.dumps(
+                        {
+                            "status": "telegram_link_updates_processed",
+                            "telegram_linking": asdict(result),
+                        },
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
+            polls += 1
+            if max_polls is None or polls < max_polls:
+                event.wait(poll_interval_seconds)
+    return 0
 
 
 def _save_bundle(store: RentalStore, bundle: ProfileBundle) -> None:

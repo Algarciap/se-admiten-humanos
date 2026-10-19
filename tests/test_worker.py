@@ -17,6 +17,7 @@ from se_admiten_humanos.worker import (
     _idealista_source,
     default_website_sources,
     run_worker,
+    run_telegram_link_worker,
     run_worker_cycle,
     run_worker_sources_cycle,
 )
@@ -237,6 +238,28 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(result.telegram_linking.links_created, 1)
         mocked_poll.assert_called_once()
         self.assertEqual(mocked_poll.call_args.args[2], "https://humanos.example")
+
+    @patch("se_admiten_humanos.worker.process_telegram_link_updates")
+    def test_dedicated_link_worker_polls_without_running_property_sources(
+        self, mocked_poll
+    ):
+        mocked_poll.return_value = TelegramLinkPollResult()
+        environment = dict(
+            self.environment,
+            TELEGRAM_BOT_TOKEN="123456:test_token",
+            TELEGRAM_BOT_USERNAME="SeAdmitenHumanosBot",
+        )
+
+        exit_code = run_telegram_link_worker(
+            self.settings,
+            environment,
+            poll_interval_seconds=0.001,
+            max_polls=2,
+        )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(mocked_poll.call_count, 2)
+        self.assertEqual(self.source.discovery_calls, 0)
 
     @patch("se_admiten_humanos.worker.process_telegram_link_updates")
     def test_link_poll_failure_is_visible_without_blocking_property_scan(

@@ -147,7 +147,8 @@ class TelegramLinkingTests(unittest.TestCase):
         )
 
         self.assertEqual(result.rejected_links, 1)
-        self.assertIn("no es válido", client.messages[0][1])
+        self.assertIn("caducado", client.messages[0][1])
+        self.assertIn("Conectar Telegram", client.messages[0][1])
         self.assertEqual(client.messages[0][2], "https://humanos.example/account")
 
     def test_malformed_start_is_rejected_instead_of_silently_ignored(self):

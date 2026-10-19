@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 
 from .web import WebApplication, WebSettings
 from .accounts import MailSettings
-from .worker import WorkerSettings, run_worker
+from .worker import WorkerSettings, run_telegram_link_worker, run_worker
 
 
 class ThreadingWSGIServer(ThreadingMixIn, WSGIServer):
@@ -127,10 +127,23 @@ def run_combined_service(
         handler_class=QuietRequestHandler,
     ) as server:
         worker_exit_code: list[int] = []
+        stop_event = threading.Event()
+        worker_environment = dict(values)
+        # Account-link commands have their own responsive poller below. Keeping the
+        # username out of the property worker prevents duplicate Bot API reads.
+        worker_environment.pop("TELEGRAM_BOT_USERNAME", None)
 
         def worker_target() -> None:
-            worker_exit_code.append(run_worker(worker_settings, values))
+            worker_exit_code.append(run_worker(worker_settings, worker_environment))
+            stop_event.set()
             server.shutdown()
+
+        def telegram_link_target() -> None:
+            run_telegram_link_worker(
+                worker_settings,
+                values,
+                stop_event=stop_event,
+            )
 
         worker_thread = threading.Thread(
             target=worker_target,
@@ -138,7 +151,17 @@ def run_combined_service(
             daemon=True,
         )
         worker_thread.start()
+        telegram_link_thread = threading.Thread(
+            target=telegram_link_target,
+            name="telegram-link-worker",
+            daemon=True,
+        )
+        telegram_link_thread.start()
         print(f"Combined service listening on http://0.0.0.0:{port}", flush=True)
-        server.serve_forever()
+        try:
+            server.serve_forever()
+        finally:
+            stop_event.set()
         worker_thread.join(timeout=5)
+        telegram_link_thread.join(timeout=5)
         return worker_exit_code[0] if worker_exit_code else 1

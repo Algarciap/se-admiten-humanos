@@ -20,7 +20,10 @@ _START_COMMAND = re.compile(
 
 # Kept together so the copy pass can revise bot voice without touching command routing.
 _WELCOME = "Configura tu búsqueda en Se admiten humanos y conecta Telegram para recibir avisos."
-_INVALID_LINK = "Este enlace ya no es válido. Entra en tu cuenta para generar uno nuevo."
+_INVALID_LINK = (
+    "Este enlace ha caducado, ya fue usado o fue sustituido por uno nuevo. "
+    "Entra en tu cuenta y pulsa «Conectar Telegram» para generar otro."
+)
 _HELP = "Este bot envía avisos de Se admiten humanos. Gestiona tu búsqueda desde tu cuenta."
 _CONNECTED = "✅ Telegram conectado. Recibirás aquí solo los pisos que encajen con tu búsqueda."
 
