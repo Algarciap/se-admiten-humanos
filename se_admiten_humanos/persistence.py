@@ -1226,7 +1226,13 @@ class RentalStore:
         token_hash: str,
         expires_at: datetime,
     ) -> None:
-        """Store one hashed, single-use Telegram linking capability."""
+        """Store a hashed, single-use Telegram linking capability.
+
+        Keep still-valid sibling links usable. A browser retry can create a new
+        deep link after Telegram has already opened the previous one; eagerly
+        deleting the first token makes that normal flow fail as "superseded".
+        All sibling links are invalidated when any one of them is consumed.
+        """
 
         normalized_user_id = user_id.strip()
         normalized_hash = token_hash.strip().casefold()
@@ -1241,8 +1247,11 @@ class RentalStore:
             raise ValueError("Telegram link expiry must be in the future")
         with self.connection:
             self.connection.execute(
-                "delete from telegram_link_tokens where user_id = ? and used_at is null",
-                (normalized_user_id,),
+                """
+                delete from telegram_link_tokens
+                where user_id = ? and (used_at is not null or expires_at <= ?)
+                """,
+                (normalized_user_id, now),
             )
             self.connection.execute(
                 """
@@ -1307,6 +1316,14 @@ class RentalStore:
                 ).rowcount
                 if updated != 1:
                     raise ValueError("Invalid or expired Telegram link")
+                self.connection.execute(
+                    """
+                    update telegram_link_tokens
+                    set used_at = ?
+                    where user_id = ? and used_at is null
+                    """,
+                    (timestamp, user_id),
+                )
         except sqlite3.IntegrityError as error:
             raise ValueError(
                 "Telegram chat is already linked to a different user"

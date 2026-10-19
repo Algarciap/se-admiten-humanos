@@ -75,6 +75,23 @@ class TelegramLinkingTests(unittest.TestCase):
                 now=future + timedelta(seconds=1),
             )
 
+    def test_new_link_does_not_invalidate_one_already_opened_in_telegram(self):
+        first = create_telegram_link(self.store, "user-1", "SeAdmitenHumanosBot")
+        second = create_telegram_link(self.store, "user-1", "SeAdmitenHumanosBot")
+
+        self.assertEqual(
+            self.store.consume_telegram_link_token(
+                hashlib.sha256(first.token.encode("ascii")).hexdigest(),
+                "123456",
+            ),
+            "user-1",
+        )
+        with self.assertRaisesRegex(ValueError, "Invalid or expired"):
+            self.store.consume_telegram_link_token(
+                hashlib.sha256(second.token.encode("ascii")).hexdigest(),
+                "123456",
+            )
+
     def test_chat_collision_does_not_consume_the_second_users_token(self):
         self.store.save_user(User(id="user-2", display_name="Second user"))
         first = create_telegram_link(self.store, "user-1", "SeAdmitenHumanosBot")
