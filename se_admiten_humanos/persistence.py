@@ -1268,8 +1268,14 @@ class RentalStore:
         chat_id: str,
         *,
         now: datetime | None = None,
+        replace_legacy_user_id: str = "",
     ) -> str:
-        """Atomically consume a valid token and bind its user to a private chat."""
+        """Atomically consume a valid token and bind its user to a private chat.
+
+        ``replace_legacy_user_id`` permits the account-link flow to take over the
+        one destination originally bootstrapped from environment variables.  It
+        does not permit replacing a chat owned by any other account or profile.
+        """
 
         normalized_hash = token_hash.strip().casefold()
         normalized_chat_id = chat_id.strip()
@@ -1294,6 +1300,21 @@ class RentalStore:
                 if row is None:
                     raise ValueError("Invalid or expired Telegram link")
                 user_id = str(row[0])
+                legacy_user_id = replace_legacy_user_id.strip()
+                if legacy_user_id and legacy_user_id != user_id:
+                    # The earliest deployment mapped one configured user directly
+                    # to this chat. Once the same chat proves possession of a new
+                    # account link, retire only that exact bootstrap mapping and
+                    # block the environment importer from resurrecting it.
+                    removed = self.connection.execute(
+                        "delete from telegram_destinations where chat_id = ? and user_id = ?",
+                        (normalized_chat_id, legacy_user_id),
+                    ).rowcount
+                    if removed:
+                        self.connection.execute(
+                            "insert or ignore into bootstrap_blocks(user_hash) values (?)",
+                            (hashlib.sha256(legacy_user_id.encode()).hexdigest(),),
+                        )
                 self.connection.execute(
                     """
                     insert into telegram_destinations (

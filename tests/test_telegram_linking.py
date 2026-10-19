@@ -108,6 +108,28 @@ class TelegramLinkingTests(unittest.TestCase):
             "user-2",
         )
 
+    def test_account_link_can_replace_only_the_configured_legacy_mapping(self):
+        self.store.save_user(User(id="user-2", display_name="Second user"))
+        self.store.save_telegram_destination("user-1", "123456")
+        link = create_telegram_link(self.store, "user-2", "SeAdmitenHumanosBot")
+        token_hash = hashlib.sha256(link.token.encode("ascii")).hexdigest()
+
+        self.assertEqual(
+            self.store.consume_telegram_link_token(
+                token_hash,
+                "123456",
+                replace_legacy_user_id="user-1",
+            ),
+            "user-2",
+        )
+        self.assertIsNone(self.store.telegram_chat_id("user-1"))
+        self.assertEqual(self.store.telegram_chat_id("user-2"), "123456")
+        blocked = self.store.connection.execute(
+            "select 1 from bootstrap_blocks where user_hash = ?",
+            (hashlib.sha256(b"user-1").hexdigest(),),
+        ).fetchone()
+        self.assertIsNotNone(blocked)
+
     def test_private_start_command_links_and_advances_cursor(self):
         link = create_telegram_link(
             self.store, "user-1", "@SeAdmitenHumanosBot"

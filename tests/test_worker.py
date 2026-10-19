@@ -240,6 +240,21 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(mocked_poll.call_args.args[2], "https://humanos.example")
 
     @patch("se_admiten_humanos.worker.process_telegram_link_updates")
+    def test_link_polling_can_retire_the_legacy_environment_mapping(self, mocked_poll):
+        mocked_poll.return_value = TelegramLinkPollResult()
+        environment = dict(
+            self.environment,
+            TELEGRAM_BOT_TOKEN="123456:test_token",
+            TELEGRAM_BOT_USERNAME="SeAdmitenHumanosBot",
+            TELEGRAM_USER_ID="legacy-user",
+            TELEGRAM_CHAT_ID="123456",
+        )
+
+        run_worker_cycle(self.settings, environment, source=self.source)
+
+        self.assertEqual(mocked_poll.call_args.args[3], "legacy-user")
+
+    @patch("se_admiten_humanos.worker.process_telegram_link_updates")
     def test_dedicated_link_worker_polls_without_running_property_sources(
         self, mocked_poll
     ):

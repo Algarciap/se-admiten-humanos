@@ -98,6 +98,7 @@ def process_telegram_link_updates(
     store: RentalStore,
     client: TelegramLinkClient,
     public_base_url: str = "",
+    legacy_user_id: str = "",
 ) -> TelegramLinkPollResult:
     """Consume private-chat `/start` links and durably advance the update cursor."""
 
@@ -133,7 +134,11 @@ def process_telegram_link_updates(
         try:
             if match is not None and match.group(1):
                 try:
-                    store.consume_telegram_link_token(_token_hash(match.group(1)), chat_id)
+                    store.consume_telegram_link_token(
+                        _token_hash(match.group(1)),
+                        chat_id,
+                        replace_legacy_user_id=legacy_user_id,
+                    )
                 except ValueError:
                     rejected += 1
                     client.send_message(

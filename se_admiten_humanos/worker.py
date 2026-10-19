@@ -224,6 +224,7 @@ def _poll_telegram_links(
             store,
             TelegramBotClient(token),
             environment.get("PUBLIC_BASE_URL", ""),
+            environment.get("TELEGRAM_USER_ID", ""),
         ), ""
     except ValueError as error:
         raise WorkerConfigurationError(str(error)) from error
