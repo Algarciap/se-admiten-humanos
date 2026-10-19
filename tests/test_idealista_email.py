@@ -138,6 +138,28 @@ class IdealistaEmailWebhookTests(unittest.TestCase):
         self.assertEqual(status, "401 Unauthorized")
         self.assertEqual(response["status"], "unauthorized")
 
+    def test_search_plan_consolidates_profiles_without_exposing_users(self):
+        captured = {}
+
+        def start_response(status, headers):
+            captured["status"] = status
+
+        environ = {
+            "REQUEST_METHOD": "GET",
+            "PATH_INFO": "/ops/idealista/search-plan",
+            "HTTP_AUTHORIZATION": f"Bearer {self.token}",
+            "wsgi.input": io.BytesIO(b""),
+        }
+        response = json.loads(b"".join(self.app(environ, start_response)))
+
+        self.assertEqual(captured["status"], "200 OK")
+        self.assertEqual(response["active_profiles"], 1)
+        self.assertEqual(response["source_searches"][0]["max_price_eur"], 950)
+        self.assertNotIn("user_id", json.dumps(response))
+        self.assertIn(
+            "pets", response["source_searches"][0]["matched_after_ingestion"]
+        )
+
     @patch("se_admiten_humanos.telegram.TelegramBotClient._request")
     def test_webhook_matches_and_delivers_without_mailbox_access(self, request):
         request.return_value = {"message_id": 42}

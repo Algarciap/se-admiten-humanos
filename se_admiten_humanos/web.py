@@ -21,6 +21,7 @@ from .persistence import RentalStore
 from .search_profile import SearchProfile
 from .telegram_linking import create_telegram_link
 from .idealista_email import process_brevo_idealista_payload
+from .idealista_coverage import plan_idealista_source_searches
 from .telegram import TelegramBotClient, TelegramNotifier
 from .accounts import Accounts, MailSettings
 
@@ -80,6 +81,8 @@ class WebApplication:
         with RentalStore(self.settings.database_path) as store:
             if path == "/webhooks/brevo/idealista" and method == "POST":
                 return self._idealista_email_webhook(store, environ, start_response)
+            if path == "/ops/idealista/search-plan" and method == "GET":
+                return self._idealista_search_plan(store, environ, start_response)
             user_id = store.web_session_user_id(session_hash) if session_hash else None
             if self.settings.accounts_enabled:
                 from .account_web import handle_accounts
@@ -339,6 +342,39 @@ class WebApplication:
             user=store.load_user(user_id),
             renter=store.load_primary_renter_profile(user_id),
             search=store.load_primary_search_profile(user_id),
+        )
+
+    def _idealista_search_plan(
+        self,
+        store: RentalStore,
+        environ: Mapping[str, object],
+        start_response: StartResponse,
+    ) -> list[bytes]:
+        """Return privacy-safe broad alerts derived from all active profiles."""
+
+        token = self.settings.idealista_email_webhook_token
+        supplied = str(environ.get("HTTP_AUTHORIZATION", ""))
+        if not token or not secrets.compare_digest(supplied, f"Bearer {token}"):
+            return self._respond(
+                start_response,
+                "401 Unauthorized",
+                json.dumps({"status": "unauthorized"}),
+                content_type="application/json; charset=utf-8",
+            )
+        profiles = store.load_enabled_search_profiles()
+        searches = plan_idealista_source_searches(profiles)
+        return self._respond(
+            start_response,
+            "200 OK",
+            json.dumps(
+                {
+                    "status": "ok",
+                    "active_profiles": len(profiles),
+                    "source_searches": [search.to_dict() for search in searches],
+                },
+                ensure_ascii=False,
+            ),
+            content_type="application/json; charset=utf-8",
         )
 
     def _save_profile(

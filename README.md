@@ -1,5 +1,17 @@
 # Se admiten humanos
 
+## Profile-driven Idealista email coverage
+
+The Idealista email source uses broad acquisition alerts derived from every
+enabled search profile. Profiles in the same municipality and property type
+share one source alert whose price ceiling is the highest required budget.
+Bedrooms, pets, districts, furnishing, availability, rental duration, and each
+person's exact budget remain downstream filters in the normal matching pipeline.
+
+Operators can inspect the privacy-safe plan with
+`GET /ops/idealista/search-plan`, authenticated with the same bearer token as
+the Brevo Idealista webhook. No user IDs or contact details are returned.
+
 A free and open-source project for helping people find long-term or temporary rentals where every member of the
 household—including pets—is welcome.
 
