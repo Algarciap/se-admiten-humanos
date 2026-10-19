@@ -1398,6 +1398,24 @@ class RentalStore:
                 ),
             )
 
+    def load_renter_profile(
+        self, profile_id: str, *, user_id: str | None = None
+    ) -> RenterProfile | None:
+        """Load one renter profile, optionally enforcing its expected owner."""
+
+        query = """
+            select id, user_id, label, sender_name, renter_name,
+                   monthly_income_eur, household_size, job, contract_type
+            from renter_profiles
+            where id = ?
+        """
+        parameters: tuple[object, ...] = (profile_id.strip(),)
+        if user_id is not None:
+            query += " and user_id = ?"
+            parameters += (user_id.strip(),)
+        row = self.connection.execute(query, parameters).fetchone()
+        return self._renter_profile_from_row(row)
+
     def load_primary_renter_profile(self, user_id: str) -> RenterProfile | None:
         """Load the first renter profile owned by a user for web editing."""
 
@@ -1412,6 +1430,11 @@ class RentalStore:
             """,
             (user_id.strip(),),
         ).fetchone()
+        return self._renter_profile_from_row(row)
+
+    def _renter_profile_from_row(
+        self, row: tuple[object, ...] | None
+    ) -> RenterProfile | None:
         if row is None:
             return None
         pet_rows = self.connection.execute(
