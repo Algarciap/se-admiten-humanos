@@ -3,7 +3,7 @@
 import unittest
 
 from se_admiten_humanos.models import Listing, Pet, RenterProfile
-from se_admiten_humanos.outreach import build_message, subject
+from se_admiten_humanos.outreach import build_copy_message, build_message, subject
 from se_admiten_humanos.pet_policy import classify
 
 
@@ -39,6 +39,21 @@ class OutreachTests(unittest.TestCase):
         )
         self.assertIn("Hemos visto que la vivienda admite mascotas", message)
         self.assertIn("concertar una visita", message)
+
+    def test_copy_message_leads_with_income_and_fits_telegram_limit(self) -> None:
+        message = build_copy_message(classify(""), self.profile)
+
+        self.assertIn("ingresos demostrables de 2.500 €/mes", message)
+        self.assertIn("contrato indefinido", message)
+        self.assertIn("dos gatos", message)
+        self.assertIn("¿Se admiten dos gatos?", message)
+        self.assertLessEqual(len(message), 256)
+
+    def test_copy_message_acknowledges_explicit_pet_acceptance(self) -> None:
+        message = build_copy_message(classify("Se admiten mascotas"), self.profile)
+
+        self.assertIn("He visto que se admiten mascotas", message)
+        self.assertLessEqual(len(message), 256)
 
     def test_household_size_is_clear_in_outreach(self) -> None:
         profile = RenterProfile(

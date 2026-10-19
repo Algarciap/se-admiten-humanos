@@ -7,7 +7,7 @@ from io import BytesIO
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from se_admiten_humanos.models import Listing, User
+from se_admiten_humanos.models import Listing, Pet, RenterProfile, User
 from se_admiten_humanos.persistence import RentalStore
 from se_admiten_humanos.pipeline import ListingPipeline
 from se_admiten_humanos.search_profile import SearchProfile
@@ -32,6 +32,18 @@ class TelegramTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.store = RentalStore(Path(self.temp.name) / "rentals.sqlite3")
         self.store.save_user(User(id="user-1", display_name="User"))
+        self.store.save_renter_profile(
+            RenterProfile(
+                id="renter-1",
+                user_id="user-1",
+                label="Principal",
+                sender_name="Ana",
+                renter_name="Ana",
+                monthly_income_eur=2500,
+                contract_type="contrato indefinido",
+                pets=(Pet(id="cats", species="gato", count=2),),
+            )
+        )
         self.store.save_search_profile(
             SearchProfile(
                 id="search-1",
@@ -39,6 +51,7 @@ class TelegramTests(unittest.TestCase):
                 name="Madrid",
                 max_rent_eur=950,
                 municipality="Madrid",
+                renter_profile_id="renter-1",
             )
         )
         self.listing = Listing(
@@ -120,6 +133,30 @@ class TelegramTests(unittest.TestCase):
         self.assertEqual(button, {"text": "Ir a mi cuenta", "url": "https://humanos.example/account"})
 
     @patch("se_admiten_humanos.telegram.urlopen")
+    def test_client_adds_copy_contact_message_button(self, mocked_urlopen: Mock) -> None:
+        mocked_urlopen.return_value = _Response(
+            json.dumps({"ok": True, "result": {"message_id": 42}}).encode()
+        )
+
+        TelegramBotClient("123456:test_token").send_message(
+            "987654",
+            "Listing",
+            self.listing.url,
+            copy_text="Hola, tengo ingresos de 2.500 €/mes.",
+        )
+
+        payload = json.loads(mocked_urlopen.call_args.args[0].data)
+        buttons = payload["reply_markup"]["inline_keyboard"][0]
+        self.assertEqual(buttons[0]["text"], "Abrir anuncio")
+        self.assertEqual(
+            buttons[1],
+            {
+                "text": "Copiar mensaje",
+                "copy_text": {"text": "Hola, tengo ingresos de 2.500 €/mes."},
+            },
+        )
+
+    @patch("se_admiten_humanos.telegram.urlopen")
     def test_client_fetches_message_updates_from_requested_offset(
         self, mocked_urlopen: Mock
     ) -> None:
@@ -148,6 +185,10 @@ class TelegramTests(unittest.TestCase):
         self.assertEqual(repeated[0].status, "skipped")
         self.assertEqual(repeated[0].detail, "already claimed")
         self.assertEqual(client.send_message.call_count, 1)
+        copied_message = client.send_message.call_args.kwargs["copy_text"]
+        self.assertIn("ingresos demostrables de 2.500 €/mes", copied_message)
+        self.assertIn("dos gatos", copied_message)
+        self.assertLessEqual(len(copied_message), 256)
 
     def test_failed_delivery_is_released_for_retry(self) -> None:
         client = Mock()

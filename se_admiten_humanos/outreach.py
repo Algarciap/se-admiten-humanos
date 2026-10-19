@@ -105,5 +105,56 @@ def build_message(
     )
 
 
+def build_copy_message(
+    pet_decision: PetDecision,
+    profile: RenterProfile,
+    *,
+    max_length: int = 256,
+) -> str:
+    """Build a concise, income-first Idealista message for a copy button."""
+
+    if max_length <= 0:
+        raise ValueError("Maximum message length must be greater than zero")
+
+    income = (
+        f"Tengo ingresos demostrables de {profile.monthly_income_eur:,} €/mes".replace(
+            ",", "."
+        )
+        if profile.monthly_income_eur is not None
+        else "Puedo aportar documentación económica"
+    )
+    employment_details = " y ".join(
+        value.strip() for value in (profile.contract_type, profile.job) if value.strip()
+    )
+    employment = f" y {employment_details}" if employment_details else ""
+    people = (
+        "Viviría una persona"
+        if profile.household_size == 1
+        else f"Viviríamos {profile.household_size} personas"
+    )
+    pets = describe_pets(profile.pets)
+    household = people + (f" con {pets}" if profile.pets else ", sin mascotas")
+    if profile.pets and pet_decision.status is PetStatus.ACCEPTED:
+        question = "He visto que se admiten mascotas. ¿Podríamos concertar una visita?"
+    elif profile.pets:
+        question = f"¿Se admiten {pets}? ¿Podríamos concertar una visita?"
+    else:
+        question = "¿Podríamos concertar una visita?"
+
+    def compose(*, include_job: bool, include_household: bool) -> str:
+        work = employment if include_job else ""
+        living = f" {household}." if include_household else ""
+        return (
+            f"Hola, me interesa la vivienda. {income}{work}.{living} "
+            f"{question} Muchas gracias."
+        )
+
+    for include_job, include_household in ((True, True), (False, True), (False, False)):
+        message = compose(include_job=include_job, include_household=include_household)
+        if len(message) <= max_length:
+            return message
+    raise ValueError("The required contact message exceeds Telegram's copy limit")
+
+
 def subject(listing: Listing) -> str:
     return f"Interés en alquiler: {listing_reference(listing)}"

@@ -6,6 +6,7 @@ This is the initial hosted topology for `Se admiten humanos`:
 Railway combined web + worker service (one replica)
     ├── polls Alquiler Seguro, Tecnocasa, Redpiso, and Nestar every 180 seconds
     ├── polls the official Idealista API every 900 seconds when credentials exist
+    ├── accepts authenticated Idealista alert emails through Brevo inbound parsing
     ├── accepts user-owned search profiles over HTTPS
     ├── sends eligible new listings to Telegram
     ├── records and alerts on per-source health transitions
@@ -57,6 +58,33 @@ private.
 | `IDEALISTA_API_SECRET` | Matching Idealista secret; must be configured with the key |
 | `IDEALISTA_POLL_INTERVAL_SECONDS` | Idealista-only cadence; default `900` to conserve quota |
 | `IDEALISTA_MAX_PAGES` | Pages per requested category; keep `1` until quota is confirmed |
+| `IDEALISTA_EMAIL_WEBHOOK_TOKEN` | Random 32+ character bearer token for Brevo's Idealista inbound-email callback |
+
+## Idealista email alerts while API access is pending
+
+This fallback receives only messages deliberately sent to a dedicated inbound subdomain. It never
+connects to Gmail, Outlook, or another personal mailbox, and it never fetches an Idealista listing
+page. Brevo converts the received alert email into JSON and posts it to the service.
+
+1. Choose a receiving subdomain different from the sending domain, for example
+   `alerts.seadmitenhumanos.org`.
+2. Verify it in Brevo and add MX records with priority `10` for `inbound1.sendinblue.com.` and
+   priority `20` for `inbound2.sendinblue.com.`.
+3. Generate a random bearer token of at least 32 characters and store it in Railway as
+   `IDEALISTA_EMAIL_WEBHOOK_TOKEN`.
+4. Create a Brevo webhook with type `inbound`, event `inboundEmailProcessed`, domain set to the
+   receiving subdomain, and URL
+   `https://YOUR-RAILWAY-DOMAIN/webhooks/brevo/idealista`. Configure bearer authentication with the
+   same token.
+5. Send one genuine Idealista alert to the inbound address and confirm the response reports one
+   accepted email and at least one listing.
+
+The receiver requires an Idealista sender domain plus passing Idealista DKIM evidence supplied in
+the parsed headers. It ignores attachments, remote images, unrelated senders, non-Idealista links,
+and messages that do not contain enough information to establish a Madrid rental and its price.
+Raw email bodies are processed in memory and are not stored. SQLite retains only normalized listing
+facts and the existing notification audit trail. Replayed callbacks are safe because listing and
+notification deduplication remain in force.
 
 For `PROFILE_BUNDLE_JSON`, copy the contents of the ignored `config/profiles.local.json`. Minifying
 it first makes pasting less error-prone, but whitespace and line breaks are valid JSON. Do not add

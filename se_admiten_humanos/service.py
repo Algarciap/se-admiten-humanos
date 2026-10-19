@@ -51,6 +51,15 @@ def web_settings_from_environment(
     accounts_value = values.get("ACCOUNTS_ENABLED", "false").strip().casefold()
     if accounts_value not in {"true", "false"}:
         raise ValueError("ACCOUNTS_ENABLED must be true or false")
+    idealista_email_webhook_token = values.get(
+        "IDEALISTA_EMAIL_WEBHOOK_TOKEN", ""
+    ).strip()
+    telegram_bot_token = values.get("TELEGRAM_BOT_TOKEN", "").strip()
+    if idealista_email_webhook_token:
+        if len(idealista_email_webhook_token) < 32:
+            raise ValueError("IDEALISTA_EMAIL_WEBHOOK_TOKEN must contain at least 32 characters")
+        if not telegram_bot_token:
+            raise ValueError("TELEGRAM_BOT_TOKEN is required for Idealista email alerts")
     mail = None
     if accounts_value == "true":
         tls_value = values.get("SMTP_IMPLICIT_TLS", "false").strip().casefold()
@@ -79,6 +88,8 @@ def web_settings_from_environment(
             status_page_token=status_page_token,
             accounts_enabled=accounts_value == "true",
             mail=mail,
+            telegram_bot_token=telegram_bot_token,
+            idealista_email_webhook_token=idealista_email_webhook_token,
         ),
         port,
     )

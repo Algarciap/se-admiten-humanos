@@ -20,6 +20,8 @@ from .monitoring import source_health_age_seconds
 from .persistence import RentalStore
 from .search_profile import SearchProfile
 from .telegram_linking import create_telegram_link
+from .idealista_email import process_brevo_idealista_payload
+from .telegram import TelegramBotClient, TelegramNotifier
 from .accounts import Accounts, MailSettings
 
 
@@ -30,6 +32,7 @@ _CSRF_COOKIE = "humanos_csrf"
 _STATUS_COOKIE = "humanos_status"
 _STATUS_SESSION_SECONDS = 8 * 60 * 60
 _MAX_BODY_BYTES = 65_536
+_MAX_WEBHOOK_BODY_BYTES = 2_000_000
 _MADRID_DISTRICTS = (
     "Arganzuela", "Barajas", "Carabanchel", "Centro", "Chamartín", "Chamberí",
     "Ciudad Lineal", "Fuencarral-El Pardo", "Hortaleza", "Latina", "Moncloa-Aravaca",
@@ -47,6 +50,8 @@ class WebSettings:
     status_page_token: str = ""
     accounts_enabled: bool = False
     mail: MailSettings | None = None
+    telegram_bot_token: str = ""
+    idealista_email_webhook_token: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +78,8 @@ class WebApplication:
         session_token = cookies.get(_SESSION_COOKIE, "")
         session_hash = _digest(session_token) if session_token else ""
         with RentalStore(self.settings.database_path) as store:
+            if path == "/webhooks/brevo/idealista" and method == "POST":
+                return self._idealista_email_webhook(store, environ, start_response)
             user_id = store.web_session_user_id(session_hash) if session_hash else None
             if self.settings.accounts_enabled:
                 from .account_web import handle_accounts
@@ -96,6 +103,7 @@ class WebApplication:
             if path == "/status" and method == "GET":
                 if not self.settings.status_page_token:
                     return self._error(start_response, "404 Not Found", "Página no encontrada.")
+
                 csrf = cookies.get(_CSRF_COOKIE) or secrets.token_urlsafe(24)
                 if not _valid_status_cookie(
                     cookies.get(_STATUS_COOKIE, ""), self.settings.status_page_token
@@ -267,6 +275,62 @@ class WebApplication:
                     cookies=(self._expired_cookie(_SESSION_COOKIE),),
                 )
         return self._error(start_response, "404 Not Found", "Página no encontrada.")
+
+    def _idealista_email_webhook(
+        self,
+        store: RentalStore,
+        environ: Mapping[str, object],
+        start_response: StartResponse,
+    ) -> list[bytes]:
+        token = self.settings.idealista_email_webhook_token
+        supplied = str(environ.get("HTTP_AUTHORIZATION", ""))
+        if not token or not secrets.compare_digest(supplied, f"Bearer {token}"):
+            return self._respond(
+                start_response,
+                "401 Unauthorized",
+                json.dumps({"status": "unauthorized"}),
+                content_type="application/json; charset=utf-8",
+            )
+        payload, error = _read_json(environ, _MAX_WEBHOOK_BODY_BYTES)
+        if error:
+            return self._respond(
+                start_response,
+                "400 Bad Request",
+                json.dumps({"status": "invalid", "error": error}),
+                content_type="application/json; charset=utf-8",
+            )
+        try:
+            result = process_brevo_idealista_payload(
+                store,
+                TelegramNotifier(
+                    store,
+                    TelegramBotClient(self.settings.telegram_bot_token),
+                ),
+                payload,
+            )
+        except ValueError as error_value:
+            return self._respond(
+                start_response,
+                "422 Unprocessable Entity",
+                json.dumps({"status": "invalid", "error": str(error_value)}),
+                content_type="application/json; charset=utf-8",
+            )
+        status = "failed" if result.notifications_failed else "processed"
+        return self._respond(
+            start_response,
+            "200 OK",
+            json.dumps(
+                {
+                    "status": status,
+                    "emails_seen": result.emails_seen,
+                    "emails_accepted": result.emails_accepted,
+                    "listings_seen": result.listings_seen,
+                    "notifications_sent": result.notifications_sent,
+                    "notifications_failed": result.notifications_failed,
+                }
+            ),
+            content_type="application/json; charset=utf-8",
+        )
 
     def _load_state(self, store: RentalStore, user_id: str | None) -> PageState:
         if user_id is None:
@@ -495,6 +559,26 @@ def _read_form(environ: Mapping[str, object]) -> tuple[dict[str, str], str]:
             item for item in values["acceptable_districts"] if item
         )
     return form, ""
+
+
+def _read_json(
+    environ: Mapping[str, object], maximum_bytes: int
+) -> tuple[object | None, str]:
+    if not str(environ.get("CONTENT_TYPE", "")).startswith("application/json"):
+        return None, "Content-Type must be application/json"
+    try:
+        length = int(str(environ.get("CONTENT_LENGTH", "0") or "0"))
+    except ValueError:
+        return None, "Invalid Content-Length"
+    if length <= 0 or length > maximum_bytes:
+        return None, "Request body is empty or too large"
+    stream = environ.get("wsgi.input")
+    if not hasattr(stream, "read"):
+        return None, "Request body is unavailable"
+    try:
+        return json.loads(stream.read(length).decode("utf-8", errors="strict")), ""
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None, "Request body is not valid JSON"
 
 
 def _valid_csrf(form: Mapping[str, str], cookies: Mapping[str, str]) -> bool:

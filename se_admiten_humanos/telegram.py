@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from .models import Listing, PetDecision, PetStatus, PropertyType, RentalDuration
+from .outreach import build_copy_message
 from .persistence import RentalStore
 from .pipeline import ProcessingResult, ProfileMatchOutcome
 from .search_profile import MatchTier
@@ -113,16 +114,27 @@ class TelegramBotClient:
         text: str,
         action_url: str = "",
         action_text: str = "Abrir anuncio",
+        copy_text: str = "",
     ) -> int:
         normalized_chat_id = chat_id.strip()
         if not _CHAT_ID.fullmatch(normalized_chat_id):
             raise ValueError("Telegram chat id must be numeric")
         payload: dict[str, object] = {"chat_id": normalized_chat_id, "text": text}
         safe_url = _listing_url(action_url)
+        buttons: list[dict[str, object]] = []
         if safe_url:
-            payload["reply_markup"] = {
-                "inline_keyboard": [[{"text": action_text[:64], "url": safe_url}]]
-            }
+            buttons.append({"text": action_text[:64], "url": safe_url})
+        if copy_text:
+            if len(copy_text) > 256:
+                raise ValueError("Telegram copy text cannot exceed 256 characters")
+            buttons.append(
+                {
+                    "text": "Copiar mensaje",
+                    "copy_text": {"text": copy_text},
+                }
+            )
+        if buttons:
+            payload["reply_markup"] = {"inline_keyboard": [buttons]}
         result = self._request("sendMessage", payload)
         return int(result["message_id"])
 
@@ -192,10 +204,24 @@ class TelegramNotifier:
                 attempts.append(DeliveryAttempt(match_id, user_id, "skipped", "already claimed"))
                 continue
             try:
+                renter_profile = (
+                    self.store.load_renter_profile(
+                        outcome.profile.renter_profile_id,
+                        user_id=user_id,
+                    )
+                    if outcome.profile.renter_profile_id
+                    else self.store.load_primary_renter_profile(user_id)
+                )
+                copy_text = (
+                    build_copy_message(result.pet_decision, renter_profile)
+                    if renter_profile is not None
+                    else ""
+                )
                 self.client.send_message(
                     chat_id,
                     format_alert(result.listing, result.pet_decision, outcome),
                     result.listing.url,
+                    copy_text=copy_text,
                 )
             except Exception as error:
                 if isinstance(error, TelegramDeliveryError):
