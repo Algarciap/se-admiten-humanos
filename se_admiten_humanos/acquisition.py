@@ -150,7 +150,11 @@ class AcquisitionRunner:
         source_id = adapter.source_id.strip().casefold()
         claim = self.store.begin_source_run(source_id, self.stale_after_seconds)
         if claim is None:
-            return AcquisitionResult(source_id=source_id, status="already_running")
+            return AcquisitionResult(
+                source_id=source_id,
+                status="busy",
+                error="Another worker owns an active source-run lease",
+            )
 
         listings_seen = 0
         eligible_matches = 0
@@ -184,6 +188,9 @@ class AcquisitionRunner:
                 acknowledge = getattr(adapter, "acknowledge", None)
                 if acknowledge is not None:
                     acknowledge(listing, attempts)
+            raise_detail_errors = getattr(adapter, "raise_detail_errors", None)
+            if raise_detail_errors is not None:
+                raise_detail_errors()
         except Exception as error:
             detail = f"{type(error).__name__}: {error}"[:1000]
             record = self.store.finish_source_run(

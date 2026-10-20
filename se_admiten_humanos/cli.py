@@ -94,7 +94,7 @@ def _report_source_failure(error: AcquisitionRunError) -> int:
 
 def _report_source_result(result: AcquisitionResult) -> int:
     print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
-    if result.status == "already_running":
+    if result.status == "busy":
         return 3
     return 1 if result.status == "failed" else 0
 

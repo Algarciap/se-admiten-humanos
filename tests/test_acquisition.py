@@ -123,7 +123,8 @@ class AcquisitionTests(unittest.TestCase):
             StaticAdapter("fixture", [self.listing()])
         )
 
-        self.assertEqual(result.status, "already_running")
+        self.assertEqual(result.status, "busy")
+        self.assertIn("active source-run lease", result.error)
         self.assertIsNone(result.run_id)
 
     def test_source_mismatch_fails_visibly(self) -> None:

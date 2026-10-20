@@ -353,7 +353,7 @@ def run_worker_cycle(
             notifier,
             max_listings_per_run=settings.max_listings_per_run,
         ).run(adapter)
-        if acquisition.status not in {"empty", "succeeded"}:
+        if acquisition.status not in {"busy", "empty", "succeeded"}:
             raise RuntimeError(
                 f"Source cycle finished with unhealthy status {acquisition.status!r}"
             )
@@ -475,6 +475,15 @@ def run_worker_sources_cycle(
                     notifier,
                     max_listings_per_run=settings.max_listings_per_run,
                 ).run(adapter)
+                if acquisition.status == "busy":
+                    results.append(
+                        WorkerCycleResult(
+                            source_id=adapter.source_id,
+                            status="busy",
+                            acquisition=acquisition,
+                        )
+                    )
+                    continue
                 if acquisition.status not in {"empty", "succeeded"}:
                     raise RuntimeError(
                         f"source finished with unhealthy status {acquisition.status!r}"
@@ -529,7 +538,7 @@ def run_worker_sources_cycle(
             status = "partial_failure"
         elif all(result.status == "baseline_created" for result in results):
             status = "baseline_created"
-        elif all(result.status in {"empty", "not_due"} for result in results):
+        elif all(result.status in {"busy", "empty", "not_due"} for result in results):
             status = "empty"
         else:
             status = "succeeded"

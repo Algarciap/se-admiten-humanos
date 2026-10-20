@@ -8,11 +8,10 @@ import re
 import time
 from collections.abc import Callable, Iterator
 from html.parser import HTMLParser
-from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
 from xml.etree import ElementTree
 
+from .http_transport import request_bytes
 from .models import Listing, RentalDuration, WebsiteDiscovery
 from .property_type import classify_property_type
 from .rental_duration import classify_rental_duration
@@ -263,21 +262,25 @@ class RedpisoSource:
     @staticmethod
     def _request_text(url: str) -> str | None:
         parsed = urlsplit(url)
-        if parsed.scheme != "https" or parsed.hostname != "www.redpiso.es":
-            raise ValueError("Refusing a non-Redpiso URL")
-        request = Request(url, headers={"User-Agent": USER_AGENT})
+        match = _LISTING_PATH.fullmatch(parsed.path)
+        stage = "sitemap discovery" if url == SITEMAP_URL else (
+            f"detail {match.group('id').upper()}" if match is not None else "detail"
+        )
+        payload = request_bytes(
+            url,
+            allowed_hostname="www.redpiso.es",
+            user_agent=USER_AGENT,
+            source_label="Redpiso",
+            stage=stage,
+            error_type=RedpisoTransportError,
+            timeout_seconds=20,
+            max_bytes=5_000_000,
+        )
+        if payload is None:
+            return None
         try:
-            with urlopen(request, timeout=20) as response:
-                payload = response.read(5_000_001)
-                if len(payload) > 5_000_000:
-                    raise RedpisoTransportError("Response exceeded 5 MB safety limit")
-                charset = response.headers.get_content_charset() or "utf-8"
-                return payload.decode(charset)
-        except HTTPError as error:
-            if error.code == 404:
-                return None
-            raise RedpisoTransportError(f"Redpiso returned HTTP {error.code}") from error
-        except (URLError, TimeoutError, UnicodeDecodeError) as error:
+            return payload.decode("utf-8-sig")
+        except UnicodeDecodeError as error:
             raise RedpisoTransportError(
-                f"Redpiso request failed: {type(error).__name__}"
+                f"Redpiso {stage} response is not valid UTF-8"
             ) from error

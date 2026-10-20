@@ -418,6 +418,31 @@ class WorkerTests(unittest.TestCase):
             self.assertIn("parser contract changed", broken_health.last_error)
             self.assertEqual(healthy_health.alert_state, "healthy")
 
+    def test_busy_source_is_skipped_without_recording_a_health_failure(self):
+        run_worker_sources_cycle(
+            self.settings,
+            self.environment,
+            sources=(self.source,),
+        )
+        with RentalStore(self.database) as store:
+            claim = store.begin_source_run(self.source.source_id)
+            self.assertIsNotNone(claim)
+            before = store.source_health(self.source.source_id)
+
+        result = run_worker_sources_cycle(
+            self.settings,
+            self.environment,
+            sources=(self.source,),
+            notifier_factory=lambda *_args: RecordingNotifier(),
+        )
+
+        self.assertEqual(result.status, "empty")
+        self.assertEqual(result.sources[0].status, "busy")
+        with RentalStore(self.database) as store:
+            after = store.source_health(self.source.source_id)
+            self.assertEqual(after.consecutive_failures, before.consecutive_failures)
+            self.assertEqual(after.last_attempt_at, before.last_attempt_at)
+
     def test_zero_inventory_is_a_visible_source_alarm(self):
         empty_source = MutableSource([])
         empty_source.source_id = "unexpectedly-empty"

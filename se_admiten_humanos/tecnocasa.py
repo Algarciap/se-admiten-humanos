@@ -9,11 +9,10 @@ import re
 import time
 from collections.abc import Callable, Iterable
 from html.parser import HTMLParser
-from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
 from xml.etree import ElementTree
 
+from .http_transport import request_bytes
 from .models import Listing, RentalDuration, WebsiteDiscovery
 from .property_type import classify_property_type
 from .rental_duration import classify_rental_duration
@@ -258,20 +257,17 @@ class TecnocasaSource:
     @staticmethod
     def _request_bytes(url: str) -> bytes | None:
         parsed = urlsplit(url)
-        if parsed.scheme != "https" or parsed.hostname != "www.tecnocasa.es":
-            raise ValueError("Refusing a non-Tecnocasa URL")
-        request = Request(url, headers={"User-Agent": USER_AGENT})
-        try:
-            with urlopen(request, timeout=20) as response:
-                payload = response.read(8_000_001)
-                if len(payload) > 8_000_000:
-                    raise TecnocasaTransportError("Response exceeded 8 MB safety limit")
-                return payload
-        except HTTPError as error:
-            if error.code == 404:
-                return None
-            raise TecnocasaTransportError(f"Tecnocasa returned HTTP {error.code}") from error
-        except (URLError, TimeoutError) as error:
-            raise TecnocasaTransportError(
-                f"Tecnocasa request failed: {type(error).__name__}"
-            ) from error
+        match = _LISTING_PATH.fullmatch(parsed.path)
+        stage = "sitemap discovery" if url in SITEMAP_URLS else (
+            f"detail {match.group('id')}" if match is not None else "detail"
+        )
+        return request_bytes(
+            url,
+            allowed_hostname="www.tecnocasa.es",
+            user_agent=USER_AGENT,
+            source_label="Tecnocasa",
+            stage=stage,
+            error_type=TecnocasaTransportError,
+            timeout_seconds=20,
+            max_bytes=8_000_000,
+        )

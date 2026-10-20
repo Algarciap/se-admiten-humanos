@@ -35,6 +35,22 @@ class MutableWebsiteSource:
         )
 
 
+class PartlyBrokenWebsiteSource(MutableWebsiteSource):
+    def fetch_listing(self, discovery):
+        self.details_fetched.append(discovery.external_id)
+        if discovery.external_id == "broken":
+            raise TimeoutError("detail timed out")
+        return Listing(
+            source_id=self.source_id,
+            external_id=discovery.external_id,
+            title="Piso nuevo",
+            price_eur=900,
+            municipality="Madrid",
+            description="Se admiten mascotas.",
+            url=discovery.url,
+        )
+
+
 class RecordingNotifier:
     def __init__(self, status: str = "sent", detail: str = "") -> None:
         self.status = status
@@ -122,6 +138,26 @@ class WebsiteWatcherTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "zero listings"):
             tuple(self.adapter.fetch())
+
+    def test_one_broken_detail_does_not_starve_later_discoveries(self) -> None:
+        self.adapter.initialize_baseline()
+        source = PartlyBrokenWebsiteSource(
+            [
+                self.old,
+                WebsiteDiscovery("broken", "https://example.test/homes/broken"),
+                WebsiteDiscovery("healthy", "https://example.test/homes/healthy"),
+            ]
+        )
+        adapter = WebsiteWatcherAdapter(self.store, source)
+
+        with self.assertRaisesRegex(Exception, "successful details continued"):
+            AcquisitionRunner(self.store, RecordingNotifier()).run(adapter)
+
+        self.assertEqual(source.details_fetched, ["broken", "healthy"])
+        pending = self.store.sync_website_discoveries(
+            source.source_id, tuple(source.discoveries)
+        )
+        self.assertEqual([item.external_id for item in pending], ["broken"])
 
 
 if __name__ == "__main__":

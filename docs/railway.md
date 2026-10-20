@@ -160,8 +160,14 @@ end-to-end production confirmation.
 
 - Missing/invalid profile or Telegram settings stop the worker immediately with a sanitized error.
 - Website, parsing, SQLite, and delivery failures are logged. A failed source does not starve the
-  remaining sources in that cycle. Three consecutive partially or fully failed cycles make the
-  process exit non-zero, after which Railway's `Always` policy restarts it.
+  remaining sources in that cycle. Three consecutive worker-wide failures make the process exit
+  non-zero, after which Railway's `Always` policy restarts it.
+- Public website requests retry timeouts, rate limits, and selected server errors up to three times
+  with bounded exponential backoff. Errors identify sitemap discovery or the affected listing ID.
+- A failed detail page stays pending while later new listings continue. The source run remains
+  visibly failed so repeated poison pages still alert instead of disappearing silently.
+- A source already owned by an active run is recorded as `busy`, not as a parser failure. Confirm
+  that the service still has exactly one replica if `busy` appears outside a deployment handover.
 - A failed Telegram delivery remains retryable and the discovery is not acknowledged as complete.
 - A Telegram account-link polling error is reported separately and does not delay property checks.
 - Parser contract changes fail visibly instead of turning a changed page into a false empty result.

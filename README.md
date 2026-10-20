@@ -115,7 +115,9 @@ personal WhatsApp accounts, or send messages through unsupported portal APIs.
   maximum-price selection from enabled user searches.
 - Baseline-safe, multi-source website watcher with live Alquiler Seguro, Tecnocasa, Redpiso, and Nestar
   adapters. Each uses a published sitemap for discovery and fetches detail pages only for unseen
-  listing IDs; one broken parser cannot prevent the other sources from running.
+  listing IDs. Transient timeouts, rate limits, and selected server failures receive bounded
+  exponential-backoff retries with stage-specific diagnostics. One broken detail cannot prevent
+  later pending listings or the other sources from running.
 - Machine-readable registry of portals, agencies, institutional landlords, and public housing sources.
 - Safe direct-email gate: draft by default, allow-listed agency email only for automatic sending.
 - Python regression tests plus source-registry validation.
@@ -200,15 +202,18 @@ worker, but the service must remain at one replica and the database must live on
 On a brand-new database, the worker imports the private profile from a sealed environment variable
 and creates independent Alquiler Seguro, Tecnocasa, Redpiso, Nestar, and optional Idealista baselines. That first cycle sends
 zero messages. Later cycles process only newly discovered listing IDs through the normal classifier,
-matching, deduplication, and Telegram pipeline. Configuration errors stop immediately; transient
-failures are logged and the process exits after three consecutive failures so Railway can restart it
-visibly.
+matching, deduplication, and Telegram pipeline. Configuration errors stop immediately; source-level
+failures are isolated and monitored, while three consecutive worker-wide failures make the process
+exit so Railway can restart it visibly.
 
 Each source stores its last attempt, last success, total inventory count, consecutive failures, and
 sanitized error. One transient failure stays quiet; the third consecutive failure alerts the operator
 in Telegram. A sudden zero-total inventory or a stale source alerts independently, and the first
 successful scan afterward sends one recovery message. `MONITORING_TELEGRAM_CHAT_ID` selects the
 operator chat; the legacy `TELEGRAM_CHAT_ID` is used as a fallback for the initial deployment.
+An active source-run lease is reported as `busy` and skipped without incrementing source failures;
+leases older than 15 minutes are reclaimed as abandoned runs. Keep exactly one Railway replica while
+SQLite is in use so `busy` remains an exceptional deployment overlap rather than routine behavior.
 
 See [`docs/railway.md`](docs/railway.md) for the exact volume, variables, deployment, verification,
 and local-scheduler handover procedure. Never commit the Telegram token, chat id, private profile,

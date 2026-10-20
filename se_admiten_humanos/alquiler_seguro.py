@@ -6,11 +6,10 @@ import re
 import time
 from collections.abc import Callable
 from html.parser import HTMLParser
-from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
 from xml.etree import ElementTree
 
+from .http_transport import request_bytes
 from .models import Listing, RentalDuration, WebsiteDiscovery
 from .property_type import classify_property_type
 from .rental_duration import classify_rental_duration
@@ -223,28 +222,26 @@ class AlquilerSeguroSource:
     @staticmethod
     def _request_text(url: str) -> str | None:
         parsed = urlsplit(url)
-        if parsed.scheme != "https" or parsed.hostname != "www.alquilerseguro.es":
-            raise ValueError("Refusing a non-Alquiler Seguro URL")
-        request = Request(url, headers={"User-Agent": USER_AGENT})
+        match = _LISTING_PATH.fullmatch(parsed.path.rstrip("/"))
+        stage = "sitemap discovery" if url == SITEMAP_URL else (
+            f"detail {match.group('id')}" if match is not None else "detail"
+        )
+        payload = request_bytes(
+            url,
+            allowed_hostname="www.alquilerseguro.es",
+            user_agent=USER_AGENT,
+            source_label="Alquiler Seguro",
+            stage=stage,
+            error_type=AlquilerSeguroTransportError,
+            timeout_seconds=15,
+            max_bytes=2_000_000,
+            accepted_content_types={"text/html", "application/xml", "text/xml"},
+        )
+        if payload is None:
+            return None
         try:
-            with urlopen(request, timeout=15) as response:
-                content_type = response.headers.get_content_type()
-                if content_type not in {"text/html", "application/xml", "text/xml"}:
-                    raise AlquilerSeguroTransportError(
-                        f"Unexpected content type: {content_type}"
-                    )
-                payload = response.read(2_000_001)
-                if len(payload) > 2_000_000:
-                    raise AlquilerSeguroTransportError("Response exceeded 2 MB safety limit")
-                charset = response.headers.get_content_charset() or "utf-8"
-                return payload.decode(charset)
-        except HTTPError as error:
-            if error.code == 404:
-                return None
+            return payload.decode("utf-8-sig")
+        except UnicodeDecodeError as error:
             raise AlquilerSeguroTransportError(
-                f"Alquiler Seguro returned HTTP {error.code}"
-            ) from error
-        except (URLError, TimeoutError, UnicodeDecodeError) as error:
-            raise AlquilerSeguroTransportError(
-                f"Alquiler Seguro request failed: {type(error).__name__}"
+                f"Alquiler Seguro {stage} response is not valid UTF-8"
             ) from error
